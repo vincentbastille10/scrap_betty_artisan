@@ -1,0 +1,13 @@
+crawl:
+  max_pages: 35
+  timeout_sec: 15
+  delay_sec: 1.2
+  user_agent: "SpectraMediaLeadCollector/1.0 (+contact: vinylesstorefrance@gmail.com)"
+  max_queue: 1500
+  max_depth: 3
+  respect_robots: true
+
+extract:
+  keep_dpo_emails: true
+  max_phones_per_site: 6
+  max_emails_per_site: 6
