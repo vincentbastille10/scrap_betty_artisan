@@ -3,3 +3,5 @@ venv/
 data/output_leads.csv
 data/*.db
 __pycache__/
+data/input_artisans.csv
+data/output_leads.csv
