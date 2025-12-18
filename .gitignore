@@ -1,0 +1,5 @@
+venv/
+.env
+data/output_leads.csv
+data/*.db
+__pycache__/
