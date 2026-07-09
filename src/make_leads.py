@@ -85,17 +85,36 @@ def guess_metier(*texts: str) -> str:
     return "artisan"
 
 
+US_STATES = {
+    "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA",
+    "ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK",
+    "OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC",
+}
+
+
+_NOT_CITY = {"Home", "Sell", "Buy", "Search", "Contact", "About", "Menu", "Real",
+             "Estate", "Team", "Login", "Sign", "View", "Our", "The"}
+
+
 def guess_ville(*texts: str) -> str:
-    """Devine la ville depuis le nom/titre : motif « … à <Ville> » (fréquent chez les artisans)."""
+    """Devine la ville. US : « City, ST » ou « City ST ». FR/EN : « à/in <Ville> »."""
     blob = " ".join(t for t in texts if t)
+    # US avec virgule : "St. Louis, MO" / "Tampa, FL"
+    for m in re.finditer(r"\b([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+){0,2}),\s*([A-Z]{2})\b", blob):
+        if m.group(2) in US_STATES and m.group(1).split()[0] not in _NOT_CITY:
+            return m.group(1).strip()
+    # US sans virgule : "Lutz FL" (un ou deux mots + code état)
+    for m in re.finditer(r"\b([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)?)\s+([A-Z]{2})\b", blob):
+        first = m.group(1).split()[0]
+        if m.group(2) in US_STATES and first not in _NOT_CITY:
+            return m.group(1).strip()
+    # FR/EN : "à Nantes" / "in Austin"
     m = re.search(
-        r"\b[àa]\s+([A-ZÀ-Ÿ][\wÀ-ÿ'’\-]+(?:[ \-][A-ZÀ-Ÿ][\wÀ-ÿ'’\-]+){0,2})",
+        r"\b(?:[àa]|in)\s+([A-ZÀ-Ÿ][\wÀ-ÿ'’\-]+(?:[ \-][A-ZÀ-Ÿ][\wÀ-ÿ'’\-]+){0,2})",
         blob,
     )
     if m:
-        ville = m.group(1).strip()
-        # retire un éventuel code postal collé
-        ville = re.sub(r"\s*\(?\d{5}\)?$", "", ville).strip()
+        ville = re.sub(r"\s*\(?\d{5}\)?$", "", m.group(1).strip()).strip()
         return ville
     return ""
 
@@ -172,7 +191,8 @@ def extract_from_html(html: str, url: str) -> dict:
     phones = list(dict.fromkeys(phones))
     name = extract_business_name(soup, url)
     return {"emails": emails, "phones": phones, "name": name,
-            "title": (soup.title.string.strip() if soup.title and soup.title.string else "")}
+            "title": (soup.title.string.strip() if soup.title and soup.title.string else ""),
+            "text": text[:8000]}
 
 
 def obscura_html(url: str, timeout_s: int = 15) -> str:
@@ -220,7 +240,7 @@ def needs_js(html: str, res: dict) -> bool:
     return (not res["phones"] and not res["emails"]) or (hidden and not res["phones"])
 
 
-def process_site(url: str, *, obscura_mode: str, timeout: int) -> dict:
+def process_site(url: str, *, obscura_mode: str, timeout: int, metier_override: str = "") -> dict:
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
     row = {"site": url, "email": "", "name": "", "metier": "", "city": "", "phone": "", "source": "requests"}
@@ -270,8 +290,8 @@ def process_site(url: str, *, obscura_mode: str, timeout: int) -> dict:
     row["email"]  = res["emails"][0] if res["emails"] else ""
     row["phone"]  = res["phones"][0] if res["phones"] else ""
     row["name"]   = res["name"]
-    row["metier"] = guess_metier(res["name"], res.get("title", ""), url)
-    row["city"]   = guess_ville(res["name"], res.get("title", ""))
+    row["metier"] = metier_override or guess_metier(res["name"], res.get("title", ""), url)
+    row["city"]   = guess_ville(res["name"], res.get("title", ""), res.get("text", ""))
     return row
 
 
@@ -307,6 +327,7 @@ def main():
     ap.add_argument("--timeout", type=int, default=15)
     ap.add_argument("--obscura", dest="obscura_mode", choices=["auto", "always", "off"], default="auto",
                     help="fallback JS : auto (si contact caché/absent), always, off")
+    ap.add_argument("--metier", default="", help="force le métier (ex: realtor) au lieu de le deviner")
     args = ap.parse_args()
 
     sites = read_sites(args.infile)
@@ -318,7 +339,8 @@ def main():
 
     rows = []
     for i, s in enumerate(sites, 1):
-        row = process_site(s, obscura_mode=(args.obscura_mode if obs_ok else "off"), timeout=args.timeout)
+        row = process_site(s, obscura_mode=(args.obscura_mode if obs_ok else "off"), timeout=args.timeout,
+                           metier_override=args.metier)
         rows.append(row)
         flag = "📧" if row["email"] else ("📞" if row["phone"] else "∅")
         print(f"[{i}/{len(sites)}] {flag} {row['site']}")
