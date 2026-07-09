@@ -85,6 +85,21 @@ def guess_metier(*texts: str) -> str:
     return "artisan"
 
 
+def guess_ville(*texts: str) -> str:
+    """Devine la ville depuis le nom/titre : motif « … à <Ville> » (fréquent chez les artisans)."""
+    blob = " ".join(t for t in texts if t)
+    m = re.search(
+        r"\b[àa]\s+([A-ZÀ-Ÿ][\wÀ-ÿ'’\-]+(?:[ \-][A-ZÀ-Ÿ][\wÀ-ÿ'’\-]+){0,2})",
+        blob,
+    )
+    if m:
+        ville = m.group(1).strip()
+        # retire un éventuel code postal collé
+        ville = re.sub(r"\s*\(?\d{5}\)?$", "", ville).strip()
+        return ville
+    return ""
+
+
 def decode_cfemail(hex_str: str) -> str:
     try:
         r = int(hex_str[:2], 16)
@@ -256,6 +271,7 @@ def process_site(url: str, *, obscura_mode: str, timeout: int) -> dict:
     row["phone"]  = res["phones"][0] if res["phones"] else ""
     row["name"]   = res["name"]
     row["metier"] = guess_metier(res["name"], res.get("title", ""), url)
+    row["city"]   = guess_ville(res["name"], res.get("title", ""))
     return row
 
 
