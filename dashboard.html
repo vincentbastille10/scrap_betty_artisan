@@ -24,13 +24,12 @@ th{color:var(--muted);font-weight:600;font-size:12px}
 
 <div class="card">
   <div class="row">
-    <div><label>Niche (secteur ciblé)</label><input id="niche" value="real estate brokerage"></div>
-    <div><label>Métier (id dans metiers.js)</label><input id="metier" value="realtor"></div>
+    <div><label>Métier ciblé</label><select id="metierSelect"></select></div>
+    <div><label>Ollama (villes en plus, si aucune sélectionnée)</label><input id="ollama" type="number" value="5"></div>
   </div>
-  <label>Villes (une par ligne) — laisse vide pour générer via Ollama</label>
-  <textarea id="cities" placeholder="Houston&#10;Miami&#10;Dallas"></textarea>
+  <label>Villes (Ctrl/Cmd+clic pour en choisir plusieurs)</label>
+  <select id="citySelect" multiple size="10"></select>
   <div class="row">
-    <div><label>Villes via Ollama (si vide ci-dessus)</label><input id="ollama" type="number" value="5"></div>
     <div><label>Courtiers par ville</label><input id="per_city" type="number" value="8"></div>
     <div><label>Anti-doublon (jours)</label><input id="resend_days" type="number" value="3"></div>
   </div>
@@ -61,10 +60,46 @@ th{color:var(--muted);font-weight:600;font-size:12px}
 </div>
 </div>
 <script>
+// Villes groupées par région (US, Europe, Moyen-Orient).
+const CITY_GROUPS = {
+  "États-Unis": ["Houston","Miami","Dallas","Austin","Phoenix","Denver","Charlotte","Raleigh",
+    "Nashville","Memphis","Atlanta","Orlando","Tampa","San Antonio","Fort Worth","Columbus",
+    "Indianapolis","Jacksonville","Sacramento","Portland","Seattle","San Diego","Las Vegas",
+    "Chicago","Boston","Philadelphia","Los Angeles","New York","Washington DC","Minneapolis"],
+  "Europe": ["London","Paris","Berlin","Madrid","Rome","Amsterdam","Brussels","Dublin",
+    "Lisbon","Vienna","Zurich","Geneva","Munich","Milan","Barcelona"],
+  "Moyen-Orient": ["Dubai","Abu Dhabi","Doha","Riyadh","Jeddah","Kuwait City","Manama",
+    "Muscat","Amman","Beirut"],
+};
+
+// Métiers les plus pertinents pour l'offre : id (doit exister dans sitea1euro/lib/metiers.js) + requête de recherche.
+const METIERS = [
+  { id: "realtor",       label: "🏡 Agent immobilier (realtor)",  niche: "real estate brokerage" },
+  { id: "estheticienne", label: "💅 Esthéticienne / institut",     niche: "esthetician spa" },
+  { id: "coiffeuse",     label: "💇 Coiffeuse / salon",            niche: "hair salon" },
+  { id: "plombier",      label: "🔧 Plombier",                    niche: "plumbing company" },
+  { id: "artisan",       label: "🛠️ Artisan du bâtiment",         niche: "home renovation contractor" },
+  { id: "coach",         label: "🏋️ Coach sportif",               niche: "personal training studio" },
+  { id: "photographe",   label: "📷 Photographe",                 niche: "photography studio" },
+  { id: "osteopathe",    label: "🦴 Ostéopathe",                  niche: "osteopathy clinic" },
+  { id: "therapeute",    label: "🧠 Thérapeute",                  niche: "therapy practice" },
+];
+
+function fillDropdowns(){
+  const cs = document.getElementById('citySelect');
+  cs.innerHTML = Object.entries(CITY_GROUPS).map(([region, cities]) =>
+    `<optgroup label="${region}">` + cities.map(c => `<option value="${c}">${c}</option>`).join('') + `</optgroup>`
+  ).join('');
+  const ms = document.getElementById('metierSelect');
+  ms.innerHTML = METIERS.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
+}
+fillDropdowns();
+
 async function start(){
-  const cities = document.getElementById('cities').value;
+  const cities = [...document.getElementById('citySelect').selectedOptions].map(o => o.value).join('\n');
+  const m = METIERS.find(x => x.id === metierSelect.value) || METIERS[0];
   const body = {
-    cities, niche: niche.value, metier: metier.value,
+    cities, niche: m.niche, metier: m.id,
     ollama: cities.trim() ? 0 : parseInt(ollama.value||0),
     per_city: parseInt(per_city.value), resend_days: parseInt(resend_days.value),
     go: go.checked, delay: 8,
@@ -79,7 +114,9 @@ async function toggleContinuous(){
   } else {
     await fetch('/api/continuous',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
       interval_h: parseFloat(interval.value), per_city: parseInt(per_city.value),
-      resend_days: parseInt(resend_days.value), go: go.checked, niche: niche.value, metier: metier.value
+      resend_days: parseInt(resend_days.value), go: go.checked,
+      niche: (METIERS.find(x=>x.id===metierSelect.value)||METIERS[0]).niche,
+      metier: metierSelect.value
     })});
   }
 }
