@@ -1,0 +1,105 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8">
+<title>HyperBetty — Panneau de contrôle</title>
+<style>
+:root{--bg:#f6f1ea;--card:#fff;--ink:#3a2f36;--muted:#8a7d84;--accent:#b76e79;--border:#e4dad2}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:'Segoe UI',system-ui,sans-serif}
+.wrap{max-width:880px;margin:0 auto;padding:28px}
+h1{font-size:24px;margin:0 0 4px}.sub{color:var(--muted);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:18px}
+label{display:block;font-size:13px;font-weight:600;color:var(--muted);margin:12px 0 5px}
+input,textarea,select{width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:14px;box-sizing:border-box;font-family:inherit}
+textarea{min-height:90px;font-family:monospace}
+.row{display:flex;gap:14px;flex-wrap:wrap}.row>div{flex:1;min-width:130px}
+button{background:var(--accent);color:#fff;border:0;padding:12px 22px;border-radius:999px;font-weight:700;cursor:pointer;font-size:14px}
+button.sec{background:#eee;color:var(--ink)}button:disabled{opacity:.5;cursor:default}
+.chk{display:flex;align-items:center;gap:8px;margin-top:14px}
+#log{background:#1a1420;color:#e8dfe3;font-family:monospace;font-size:12px;padding:14px;border-radius:10px;height:260px;overflow-y:auto;white-space:pre-wrap}
+.badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700}
+.badge.on{background:#dff5e1;color:#1e7e34}.badge.off{background:#f0e6e0;color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)}
+th{color:var(--muted);font-weight:600;font-size:12px}
+</style></head><body><div class="wrap">
+<h1>🚀 HyperBetty</h1>
+<p class="sub">Trouve des courtiers, crée leur site + Betty, envoie l'email. Tourne sur ta machine (contourne les blocages anti-bot des moteurs de recherche).</p>
+
+<div class="card">
+  <div class="row">
+    <div><label>Niche (secteur ciblé)</label><input id="niche" value="real estate brokerage"></div>
+    <div><label>Métier (id dans metiers.js)</label><input id="metier" value="realtor"></div>
+  </div>
+  <label>Villes (une par ligne) — laisse vide pour générer via Ollama</label>
+  <textarea id="cities" placeholder="Houston&#10;Miami&#10;Dallas"></textarea>
+  <div class="row">
+    <div><label>Villes via Ollama (si vide ci-dessus)</label><input id="ollama" type="number" value="5"></div>
+    <div><label>Courtiers par ville</label><input id="per_city" type="number" value="8"></div>
+    <div><label>Anti-doublon (jours)</label><input id="resend_days" type="number" value="3"></div>
+  </div>
+  <div class="chk"><input type="checkbox" id="go"><label for="go" style="margin:0">Envoi réel (sinon aperçu — ne crée rien)</label></div>
+  <div style="margin-top:18px;display:flex;gap:10px">
+    <button onclick="start()">Lancer</button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="row" style="align-items:flex-end">
+    <div><label>Mode continu — relance toutes les (heures)</label><input id="interval" type="number" value="6"></div>
+    <div style="flex:0"><button class="sec" id="contBtn" onclick="toggleContinuous()">Activer le mode continu</button></div>
+    <div style="flex:0"><span id="contBadge" class="badge off">arrêté</span></div>
+  </div>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <strong>Journal en direct</strong><span id="runBadge" class="badge off">inactif</span>
+  </div>
+  <div id="log"></div>
+</div>
+
+<div class="card">
+  <strong>Historique des envois (<span id="histCount">0</span>)</strong>
+  <table><thead><tr><th>Email</th><th>Date</th></tr></thead><tbody id="histBody"></tbody></table>
+</div>
+</div>
+<script>
+async function start(){
+  const cities = document.getElementById('cities').value;
+  const body = {
+    cities, niche: niche.value, metier: metier.value,
+    ollama: cities.trim() ? 0 : parseInt(ollama.value||0),
+    per_city: parseInt(per_city.value), resend_days: parseInt(resend_days.value),
+    go: go.checked, delay: 8,
+  };
+  const r = await fetch('/api/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  if(!r.ok){ const d=await r.json(); alert(d.error||'erreur'); }
+}
+async function toggleContinuous(){
+  const badge = document.getElementById('contBadge');
+  if(badge.textContent === 'actif'){
+    await fetch('/api/continuous',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stop:true})});
+  } else {
+    await fetch('/api/continuous',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      interval_h: parseFloat(interval.value), per_city: parseInt(per_city.value),
+      resend_days: parseInt(resend_days.value), go: go.checked, niche: niche.value, metier: metier.value
+    })});
+  }
+}
+async function poll(){
+  try{
+    const s = await (await fetch('/api/status')).json();
+    runBadge.textContent = s.running ? 'en cours…' : 'inactif';
+    runBadge.className = 'badge ' + (s.running ? 'on' : 'off');
+    contBadge.textContent = s.continuous ? 'actif' : 'arrêté';
+    contBadge.className = 'badge ' + (s.continuous ? 'on' : 'off');
+    contBtn.textContent = s.continuous ? 'Arrêter le mode continu' : 'Activer le mode continu';
+    const log = await (await fetch('/api/log')).text();
+    const box = document.getElementById('log');
+    const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
+    box.textContent = log;
+    if(atBottom) box.scrollTop = box.scrollHeight;
+    const h = await (await fetch('/api/history')).json();
+    histCount.textContent = h.total;
+    histBody.innerHTML = h.rows.map(r=>`<tr><td>${r.email}</td><td>${r.date.slice(0,16).replace('T',' ')}</td></tr>`).join('');
+  }catch(e){}
+}
+setInterval(poll, 2000); poll();
+</script></body></html>
