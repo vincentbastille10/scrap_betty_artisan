@@ -44,45 +44,90 @@ PORTALS = ("bing.", "microsoft.", "msn.", "zillow", "realtor.com", "trulia", "re
            "homelight.com", "fastexpert.com", "ratemyagent.com", "upnest.com", "niche.com")
 
 
+def _ollama_pick_model(requested: str) -> str:
+    """Trouve un modèle Ollama réellement installé (le demandé, sinon un gemma/llama)."""
+    try:
+        tags = requests.get("http://localhost:11434/api/tags", timeout=10).json()
+        names = [m["name"] for m in tags.get("models", [])]
+    except Exception as e:
+        print(f"⚠️  Ollama injoignable sur localhost:11434 ({e}). Lance-le, ou utilise --cities.")
+        return ""
+    if not names:
+        print("⚠️  Aucun modèle Ollama installé (ollama pull gemma3). Utilise --cities en attendant.")
+        return ""
+    # match exact, sinon préfixe (gemma3 → gemma3:latest), sinon 1er gemma/llama, sinon 1er
+    for n in names:
+        if n == requested or n.split(":")[0] == requested:
+            return n
+    for kw in ("gemma", "llama", "mistral", "qwen"):
+        for n in names:
+            if kw in n:
+                print(f"ℹ️  Modèle '{requested}' absent → j'utilise '{n}'.")
+                return n
+    print(f"ℹ️  Modèle '{requested}' absent → j'utilise '{names[0]}'.")
+    return names[0]
+
+
 def ollama_cities(n: int, model: str) -> list[str]:
     """Demande N villes US à Ollama (local, gratuit)."""
-    prompt = (f"List {n} mid-size US cities good for real estate prospecting, "
-              f"one per line, city name only, no numbering, no state.")
+    m = _ollama_pick_model(model)
+    if not m:
+        return []
+    prompt = (f"List exactly {n} different mid-size US cities good for real estate "
+              f"prospecting. Output ONLY the city names, one per line, no state, no "
+              f"numbering, no extra text.")
     try:
         r = requests.post("http://localhost:11434/api/generate",
-                          json={"model": model, "prompt": prompt, "stream": False}, timeout=120)
-        txt = r.json().get("response", "")
-        cities = [re.sub(r"^[\d.\-)\s]+", "", l).strip() for l in txt.splitlines() if l.strip()]
-        return [c for c in cities if 2 < len(c) < 30][:n]
+                          json={"model": m, "prompt": prompt, "stream": False}, timeout=180)
+        j = r.json()
+        txt = j.get("response", "") or ""
+        if not txt and j.get("error"):
+            print(f"⚠️  Ollama a répondu: {j['error']}")
+        cities = [re.sub(r"^[\d.\-)\*\s]+", "", l).strip(" .") for l in txt.splitlines() if l.strip()]
+        cities = [c for c in cities if 2 < len(c) < 30 and not c.lower().startswith(("here", "sure", "these"))]
+        if not cities:
+            print("⚠️  Ollama n'a pas renvoyé de villes exploitables — utilise --cities.")
+        return cities[:n]
     except Exception as e:
         print(f"⚠️  Ollama indisponible ({e}) — donne des villes avec --cities.")
         return []
 
 
+def _ddg(query: str) -> str:
+    """1 requête DDG HTML, avec retry après pause si throttlé (HTTP 202/vide)."""
+    for attempt in range(2):
+        try:
+            r = requests.post("https://html.duckduckgo.com/html/",
+                              data={"q": query}, headers={"User-Agent": UA}, timeout=20)
+            if r.status_code == 200 and "result__a" in r.text:
+                return r.text
+        except Exception:
+            pass
+        if attempt == 0:
+            print("     …DDG throttlé, pause 20 s…")
+            time.sleep(20)
+    return ""
+
+
 def discover(city: str, n: int) -> list[str]:
-    """Scrape DuckDuckGo HTML (IP résidentielle locale) → URLs racine de courtiers."""
+    """Scrape DuckDuckGo HTML (IP résidentielle locale) → URLs racine de courtiers.
+    1 seule requête par ville pour ménager le rate-limit."""
     from urllib.parse import unquote
     out, seen = [], set()
-    for q in (f"real estate brokerage {city}", f"independent real estate agent {city} office"):
+    html = _ddg(f"real estate brokerage {city}")
+    for h in re.findall(r'result__a[^>]+href="([^"]+)"', html):
+        m = re.search(r'uddg=([^&]+)', h)
+        real = unquote(m.group(1)) if m else h
         try:
-            html = requests.post("https://html.duckduckgo.com/html/",
-                                 data={"q": q}, headers={"User-Agent": UA}, timeout=20).text
+            host = urlparse(real).netloc.replace("www.", "").lower()
         except Exception:
             continue
-        for h in re.findall(r'result__a[^>]+href="([^"]+)"', html):
-            m = re.search(r'uddg=([^&]+)', h)
-            real = unquote(m.group(1)) if m else h
-            try:
-                host = urlparse(real).netloc.replace("www.", "").lower()
-            except Exception:
-                continue
-            if "." not in host or any(p in host for p in PORTALS) or host in seen:
-                continue
-            seen.add(host)
-            out.append("https://" + host + "/")
-            if len(out) >= n:
-                return out
-        time.sleep(0.5)
+        if "." not in host or any(p in host for p in PORTALS) or host in seen:
+            continue
+        seen.add(host)
+        out.append("https://" + host + "/")
+        if len(out) >= n:
+            break
     return out
 
 
@@ -92,6 +137,7 @@ def main():
     ap.add_argument("--ollama", type=int, default=0, help="génère N villes via Ollama")
     ap.add_argument("--model", default="gemma2")
     ap.add_argument("--per-city", type=int, default=8)
+    ap.add_argument("--delay", type=int, default=8, help="pause (s) entre villes pour éviter le rate-limit DDG")
     ap.add_argument("--limit", type=int, default=40)
     ap.add_argument("--go", action="store_true", help="crée les sites + envoie (sinon aperçu)")
     ap.add_argument("--site", default="https://sitea1euro.vercel.app", help="base du generate-site")
@@ -109,12 +155,14 @@ def main():
 
     # 1) Découverte
     urls = []
-    for c in cities:
+    for idx, c in enumerate(cities):
         found = discover(c, args.per_city)
         print(f"  🔎 {c}: {len(found)} courtiers")
         for f in found:
             if f not in urls:
                 urls.append(f)
+        if idx < len(cities) - 1:
+            time.sleep(args.delay)
     urls = urls[: args.limit]
     print(f"\n→ {len(urls)} courtiers à traiter\n")
 
