@@ -157,18 +157,19 @@ def main():
     obs = Path(OBSCURA_BIN).exists() or __import__("shutil").which(OBSCURA_BIN)
     print(f"\n🚀 HyperBetty local — villes={len(cities)} | obscura={'✅' if obs else '❌'} | mode={'ENVOI' if args.go else 'APERÇU'}\n")
 
-    # 1) Découverte
-    urls = []
+    # 1) Découverte — on garde (url, ville de recherche) pour le fallback ville.
+    targets, seen = [], set()
     for idx, c in enumerate(cities):
         found = discover(c, args.per_city, args.niche)
         print(f"  🔎 {c}: {len(found)} courtiers")
         for f in found:
-            if f not in urls:
-                urls.append(f)
+            if f not in seen:
+                seen.add(f)
+                targets.append((f, c))
         if idx < len(cities) - 1:
             time.sleep(args.delay)
-    urls = urls[: args.limit]
-    print(f"\n→ {len(urls)} courtiers à traiter\n")
+    targets = targets[: args.limit]
+    print(f"\n→ {len(targets)} courtiers à traiter\n")
 
     # 2) Scrape + 3) génération
     from datetime import datetime
@@ -188,18 +189,23 @@ def main():
             return False
 
     created = 0
-    for i, u in enumerate(urls, 1):
-        row = process_site(u, obscura_mode=("auto" if obs else "off"), timeout=args.timeout, metier_override=args.metier)
-        miss = [k for k in ("email", "name", "city") if not row.get(k)]
-        if miss:
-            print(f"[{i}/{len(urls)}] ⏭️  {u} — manque {','.join(miss)}")
+    for i, (u, ccity) in enumerate(targets, 1):
+        row = process_site(u, obscura_mode=("auto" if obs else "off"), timeout=args.timeout,
+                           metier_override=args.metier, searched_city=ccity)
+        # On ne bloque QUE si aucun email exploitable (nom + ville ont toujours un fallback).
+        if not row.get("email"):
+            print(f"[{i}/{len(targets)}] ⏭️  {u} — aucun email (pages: {row['pages_visited'] or '-'})")
             continue
+        cv = " ⚠️ville non vérifiée" if row["city_unverified"] else ""
+        info = (f"name={row['name']!r}[{row['name_source']}] city={row['city']}[{row['city_source']}]{cv} "
+                f"email={row['email']}[{row['email_source']}]")
         if args.go and recently(row["email"]):
-            print(f"[{i}/{len(urls)}] ⏭️  {row['email']} déjà contacté (< {args.resend_days}j)")
+            print(f"[{i}/{len(targets)}] ⏭️  {row['email']} déjà contacté (< {args.resend_days}j)")
             continue
         if not args.go:
-            print(f"[{i}/{len(urls)}] • {row['name']} | {row['email']} | {row['city']}")
+            print(f"[{i}/{len(targets)}] • {info}")
             continue
+        print(f"[{i}/{len(targets)}] {info}")
         try:
             r = requests.post(args.site.rstrip('/') + "/api/generate-site",
                               json={"metier": args.metier, "nom_enseigne": row["name"], "ville": row["city"],
@@ -210,11 +216,11 @@ def main():
                 created += 1
                 with open(SENT, "a") as sf:
                     sf.write(f"{row['email']},{datetime.now().isoformat()}\n")
-                print(f"[{i}/{len(urls)}] ✅ {row['name']} → {d.get('url')}")
+                print(f"[{i}/{len(targets)}] ✅ {row['name']} → {d.get('url')}")
             else:
-                print(f"[{i}/{len(urls)}] ❌ {row['name']} — {d.get('error', r.status_code)}")
+                print(f"[{i}/{len(targets)}] ❌ {row['name']} — {d.get('error', r.status_code)}")
         except Exception as e:
-            print(f"[{i}/{len(urls)}] ❌ {u} — {e}")
+            print(f"[{i}/{len(targets)}] ❌ {u} — {e}")
         time.sleep(0.3)
 
     print(f"\n{'✅ '+str(created)+' sites créés + emails envoyés.' if args.go else 'ℹ️  Aperçu — relance avec --go pour créer + envoyer.'}")

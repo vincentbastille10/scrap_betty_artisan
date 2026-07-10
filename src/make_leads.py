@@ -96,26 +96,74 @@ _NOT_CITY = {"Home", "Sell", "Buy", "Search", "Contact", "About", "Menu", "Real"
              "Estate", "Team", "Login", "Sign", "View", "Our", "The"}
 
 
-def guess_ville(*texts: str) -> str:
-    """Devine la ville. US : « City, ST » ou « City ST ». FR/EN : « à/in <Ville> »."""
-    blob = " ".join(t for t in texts if t)
-    # US avec virgule : "St. Louis, MO" / "Tampa, FL"
-    for m in re.finditer(r"\b([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+){0,2}),\s*([A-Z]{2})\b", blob):
-        if m.group(2) in US_STATES and m.group(1).split()[0] not in _NOT_CITY:
-            return m.group(1).strip()
-    # US sans virgule : "Lutz FL" (un ou deux mots + code état)
-    for m in re.finditer(r"\b([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)?)\s+([A-Z]{2})\b", blob):
-        first = m.group(1).split()[0]
-        if m.group(2) in US_STATES and first not in _NOT_CITY:
-            return m.group(1).strip()
-    # FR/EN : "à Nantes" / "in Austin"
-    m = re.search(
-        r"\b(?:[àa]|in)\s+([A-ZÀ-Ÿ][\wÀ-ÿ'’\-]+(?:[ \-][A-ZÀ-Ÿ][\wÀ-ÿ'’\-]+){0,2})",
-        blob,
-    )
-    if m:
-        ville = re.sub(r"\s*\(?\d{5}\)?$", "", m.group(1).strip()).strip()
-        return ville
+UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+
+# Plateformes / annuaires nationaux : ce ne sont pas des prospects, on les exclut.
+DIRECTORY_DOMAINS = {
+    "classpass.com", "peerspace.com", "sortlist.com", "yelp.com", "tripadvisor.com",
+    "houzz.com", "thumbtack.com", "angi.com", "booksy.com", "vagaro.com", "fresha.com",
+    "treatwell.com", "planity.com", "mindbodyonline.com", "wellnessliving.com",
+    "facebook.com", "instagram.com", "linkedin.com", "nextdoor.com", "bbb.org",
+}
+
+# Pages internes à visiter (max 5), dans l'ordre.
+CONTACT_PATHS = ["", "contact", "contact-us", "about", "about-us"]
+
+# Mots qui ne sont jamais une ville (garde-fou sur le motif « City, ST »).
+_CITY_STOP = {
+    "Home", "Sell", "Buy", "Search", "Contact", "About", "Menu", "Real", "Estate",
+    "Team", "Login", "Sign", "View", "Our", "The", "Visa", "Visas", "Xxl", "Xxxl",
+    "Size", "Sizes", "Color", "Colors", "Price", "Prices", "New", "Sale", "Shop",
+    "Blog", "News", "Terms", "Privacy", "Careers", "Services", "Service", "Book",
+}
+
+
+def _clean_name(s: str) -> str:
+    """Nettoie un titre → nom d'enseigne (coupe les suffixes bruyants)."""
+    return re.split(r"\s*[|–—:·]\s*| - ", (s or "").strip())[0].strip()[:120]
+
+
+def _domain_name(url: str) -> str:
+    host = urlparse(url).netloc.replace("www.", "")
+    return host.split(".")[0].replace("-", " ").title()
+
+
+def parse_jsonld(soup: BeautifulSoup):
+    """Retourne (name, city) depuis les blocs JSON-LD (Organization/LocalBusiness/PostalAddress)."""
+    import json as _json
+    name, city = "", ""
+    for tag in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        raw = tag.string or tag.get_text() or ""
+        try:
+            data = _json.loads(raw)
+        except Exception:
+            continue
+        stack = [data]
+        while stack:
+            x = stack.pop()
+            if isinstance(x, dict):
+                if not name and isinstance(x.get("name"), str):
+                    name = x["name"].strip()
+                addr = x.get("address")
+                for a in (addr if isinstance(addr, list) else [addr]):
+                    if isinstance(a, dict) and not city and isinstance(a.get("addressLocality"), str):
+                        city = a["addressLocality"].strip()
+                for v in x.values():
+                    if isinstance(v, (dict, list)):
+                        stack.append(v)
+            elif isinstance(x, list):
+                stack.extend(x)
+    return name[:120], city[:60]
+
+
+def city_from_text(text: str) -> str:
+    """Ville depuis le texte UNIQUEMENT via le motif « City, ST » (virgule + vrai code état).
+    Ne devine JAMAIS depuis un mot arbitraire en majuscules (évite 'XXXL', 'Visas')."""
+    for m in re.finditer(r"\b([A-Z][A-Za-z.'’\-]+(?:\s+[A-Z][A-Za-z.'’\-]+){0,2}),\s*([A-Z]{2})\b", text or ""):
+        city, st = m.group(1).strip(), m.group(2)
+        if (st in US_STATES and city.split()[0] not in _CITY_STOP
+                and re.fullmatch(r"[A-Za-z.'’\- ]{3,40}", city)):
+            return city
     return ""
 
 
@@ -154,12 +202,12 @@ def extract_business_name(soup: BeautifulSoup, url: str) -> str:
     return re.sub(r"^https?://(www\.)?", "", url).split("/")[0]
 
 
-def extract_from_html(html: str, url: str) -> dict:
+def parse_page(html: str, url: str) -> dict:
+    """Analyse UNE page : emails (mailto/Cloudflare/texte), candidats nom
+    (og:site_name, JSON-LD, title, h1), ville structurée (JSON-LD), + footer/texte."""
     soup = BeautifulSoup(html, "lxml")
-
     emails, phones = [], []
 
-    # 1) mailto: / tel: (les plus fiables)
     for a in soup.select("a[href^='mailto:']"):
         e = clean_email(a.get("href", "")[7:].split("?")[0])
         if e:
@@ -168,14 +216,12 @@ def extract_from_html(html: str, url: str) -> dict:
         p = normalize_phone_fr(a.get("href", "")[4:])
         if p:
             phones.append(p)
-
-    # 2) Cloudflare
-    for a in soup.select("a.__cf_email__, span.__cf_email__"):
-        e = clean_email(decode_cfemail(a.get("data-cfemail", "") or ""))
+    # Cloudflare : classe dédiée OU n'importe quel élément avec data-cfemail
+    for el in soup.select("a.__cf_email__, span.__cf_email__, [data-cfemail]"):
+        e = clean_email(decode_cfemail(el.get("data-cfemail", "") or ""))
         if e:
             emails.append(e)
 
-    # 3) texte VISIBLE seulement (jamais le HTML brut → pas de faux numéros)
     text = soup.get_text(" ", strip=True)
     for m in EMAIL_RE.findall(text):
         e = clean_email(m)
@@ -186,13 +232,21 @@ def extract_from_html(html: str, url: str) -> dict:
         if p:
             phones.append(p)
 
-    # dédup en gardant l'ordre
-    emails = list(dict.fromkeys(emails))
-    phones = list(dict.fromkeys(phones))
-    name = extract_business_name(soup, url)
-    return {"emails": emails, "phones": phones, "name": name,
-            "title": (soup.title.string.strip() if soup.title and soup.title.string else ""),
-            "text": text[:8000]}
+    og = soup.find("meta", attrs={"property": "og:site_name"})
+    og_name = og["content"].strip() if og and og.get("content") else ""
+    jl_name, jl_city = parse_jsonld(soup)
+    title = soup.title.string.strip() if soup.title and soup.title.string else ""
+    h1el = soup.find("h1")
+    h1 = h1el.get_text(" ", strip=True) if h1el else ""
+    footer = soup.find("footer")
+    footer_text = footer.get_text(" ", strip=True)[:2000] if footer else ""
+
+    return {
+        "emails": list(dict.fromkeys(emails)),
+        "phones": list(dict.fromkeys(phones)),
+        "og_name": og_name, "jl_name": jl_name, "jl_city": jl_city,
+        "title": title, "h1": h1, "footer": footer_text, "text": text[:6000],
+    }
 
 
 def obscura_html(url: str, timeout_s: int = 15) -> str:
@@ -240,58 +294,102 @@ def needs_js(html: str, res: dict) -> bool:
     return (not res["phones"] and not res["emails"]) or (hidden and not res["phones"])
 
 
-def process_site(url: str, *, obscura_mode: str, timeout: int, metier_override: str = "") -> dict:
+def _fetch(url: str, timeout: int) -> str:
+    try:
+        r = requests.get(url, timeout=timeout, headers={"User-Agent": UA})
+        return r.text if r.ok else ""
+    except Exception:
+        return ""
+
+
+def process_site(url: str, *, obscura_mode: str, timeout: int,
+                 metier_override: str = "", searched_city: str = "") -> dict:
+    """Enrichit un domaine : visite jusqu'à 5 pages internes, agrège emails/nom/ville
+    depuis des sources structurées, ne bloque QUE si aucun email exploitable."""
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
-    row = {"site": url, "email": "", "name": "", "metier": "", "city": "", "phone": "", "source": "requests"}
+    host = urlparse(url).netloc.replace("www.", "").lower()
+    row = {"site": url, "email": "", "name": "", "metier": metier_override or "", "city": "",
+           "phone": "", "city_unverified": "", "email_source": "", "name_source": "",
+           "city_source": "", "pages_visited": "", "source": "requests"}
 
-    try:
-        r = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0 (compatible; BettyLeadBot/1.0)"})
-        html = r.text
-    except Exception as e:
-        row["source"] = f"ERR {type(e).__name__}"
+    # Exclure annuaires / plateformes nationales (pas des prospects).
+    if any(host == d or host.endswith("." + d) for d in DIRECTORY_DOMAINS):
+        row["source"] = "skip:annuaire"
         return row
 
-    res = extract_from_html(html, url)
+    base = f"https://{host}"
+    visited = []
+    emails, email_src = [], ""
+    og_name = jl_name = title = h1 = jl_city = ""
+    addr_blob = ""
 
-    # Si pas d'email sur l'accueil, on va le chercher sur contact / mentions légales
-    # (obligation RGPD : ces pages listent souvent le seul email du site).
-    if not res["emails"]:
-        try:
-            soup0 = BeautifulSoup(html, "lxml")
-            for cpage in find_contact_pages(soup0, url):
-                try:
-                    cr = requests.get(cpage, timeout=timeout,
-                                      headers={"User-Agent": "Mozilla/5.0 (compatible; BettyLeadBot/1.0)"})
-                    sub = extract_from_html(cr.text, url)
-                    res["emails"] = list(dict.fromkeys(res["emails"] + sub["emails"]))
-                    res["phones"] = list(dict.fromkeys(res["phones"] + sub["phones"]))
-                    if res["emails"]:
-                        row["source"] = "requests+contact"
-                        break
-                except Exception:
-                    continue
-        except Exception:
-            pass
+    for path in CONTACT_PATHS:
+        page_url = base + ("/" if not path else "/" + path)
+        html = _fetch(page_url, timeout)
+        if not html:
+            continue
+        visited.append(path or "/")
+        p = parse_page(html, page_url)
+        for e in p["emails"]:
+            if e not in emails:
+                if not emails:
+                    email_src = f"page:{path or '/'}"
+                emails.append(e)
+        if not row["phone"] and p["phones"]:
+            row["phone"] = p["phones"][0]
+        og_name = og_name or p["og_name"]
+        jl_name = jl_name or p["jl_name"]
+        jl_city = jl_city or p["jl_city"]
+        title = title or p["title"]
+        h1 = h1 or p["h1"]
+        addr_blob += " " + p["footer"] + " " + (p["text"] if path else "")
 
-    # Fallback obscura (rend le JS) si demandé et si le contact est manquant/caché
-    if obscura_mode != "off" and (obscura_mode == "always" or needs_js(html, res)):
-        oh = obscura_html(url, timeout)
+    # Fallback obscura (rend le JS) si toujours pas d'email et mode actif.
+    if not emails and obscura_mode != "off":
+        oh = obscura_html(base + "/", timeout)
         if oh:
-            res2 = extract_from_html(oh, url)
-            # on garde le meilleur des deux (union)
-            res2["emails"] = list(dict.fromkeys(res["emails"] + res2["emails"]))
-            res2["phones"] = list(dict.fromkeys(res["phones"] + res2["phones"]))
-            res2["name"] = res["name"] or res2["name"]
-            if res2["emails"] or res2["phones"]:
-                res = res2
-                row["source"] = "obscura"
+            visited.append("obscura:/")
+            p = parse_page(oh, base + "/")
+            if p["emails"]:
+                emails, email_src, row["source"] = p["emails"], "obscura", "obscura"
+            og_name = og_name or p["og_name"]
+            jl_name = jl_name or p["jl_name"]
+            jl_city = jl_city or p["jl_city"]
+            title = title or p["title"]
+            h1 = h1 or p["h1"]
+            addr_blob += " " + p["footer"]
 
-    row["email"]  = res["emails"][0] if res["emails"] else ""
-    row["phone"]  = res["phones"][0] if res["phones"] else ""
-    row["name"]   = res["name"]
-    row["metier"] = metier_override or guess_metier(res["name"], res.get("title", ""), url)
-    row["city"]   = guess_ville(res["name"], res.get("title", ""), res.get("text", ""))
+    row["pages_visited"] = ",".join(visited)
+
+    # NOM : og:site_name → JSON-LD → title → h1 → domaine nettoyé
+    if og_name:
+        row["name"], row["name_source"] = _clean_name(og_name), "og:site_name"
+    elif jl_name:
+        row["name"], row["name_source"] = _clean_name(jl_name), "json-ld"
+    elif title:
+        row["name"], row["name_source"] = _clean_name(title), "title"
+    elif h1:
+        row["name"], row["name_source"] = _clean_name(h1), "h1"
+    else:
+        row["name"], row["name_source"] = _domain_name(url), "domain"
+
+    # VILLE : adresse structurée (JSON-LD) → « City, ST » dans footer/contact →
+    # sinon ville recherchée avec city_unverified=true. Jamais un mot arbitraire.
+    if jl_city:
+        row["city"], row["city_source"] = jl_city, "json-ld"
+    else:
+        ct = city_from_text(addr_blob) or city_from_text(" ".join([title, h1, og_name]))
+        if ct:
+            row["city"], row["city_source"] = ct, "text"
+        elif searched_city:
+            row["city"], row["city_source"], row["city_unverified"] = searched_city, "searched", "true"
+
+    # EMAIL : seul champ bloquant.
+    if emails:
+        row["email"], row["email_source"] = emails[0], email_src
+    if not row["metier"]:
+        row["metier"] = guess_metier(row["name"], title, url)
     return row
 
 
@@ -328,6 +426,7 @@ def main():
     ap.add_argument("--obscura", dest="obscura_mode", choices=["auto", "always", "off"], default="auto",
                     help="fallback JS : auto (si contact caché/absent), always, off")
     ap.add_argument("--metier", default="", help="force le métier (ex: realtor) au lieu de le deviner")
+    ap.add_argument("--city", default="", help="ville recherchée (fallback si aucune ville trouvée → city_unverified)")
     args = ap.parse_args()
 
     sites = read_sites(args.infile)
@@ -340,15 +439,19 @@ def main():
     rows = []
     for i, s in enumerate(sites, 1):
         row = process_site(s, obscura_mode=(args.obscura_mode if obs_ok else "off"), timeout=args.timeout,
-                           metier_override=args.metier)
+                           metier_override=args.metier, searched_city=args.city)
         rows.append(row)
-        flag = "📧" if row["email"] else ("📞" if row["phone"] else "∅")
-        print(f"[{i}/{len(sites)}] {flag} {row['site']}")
-        print(f"      name={row['name']!r}  metier={row['metier']}  email={row['email'] or '-'}  phone={row['phone'] or '-'}  [{row['source']}]")
+        flag = "📧" if row["email"] else "∅"
+        print(f"[{i}/{len(sites)}] {flag} {row['site']}  (pages: {row['pages_visited'] or '-'})")
+        cv = " ⚠️non vérifiée" if row["city_unverified"] else ""
+        print(f"      name={row['name']!r}[{row['name_source']}]  city={row['city'] or '-'}[{row['city_source']}]{cv}"
+              f"  email={row['email'] or '-'}[{row['email_source']}]")
 
+    cols = ["site", "email", "name", "metier", "city", "phone", "city_unverified",
+            "email_source", "name_source", "city_source", "pages_visited", "source"]
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     with open(args.out, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["site", "email", "name", "metier", "city", "phone", "source"])
+        w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
         w.writerows(rows)
 
