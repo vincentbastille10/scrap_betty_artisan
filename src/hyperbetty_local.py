@@ -141,6 +141,7 @@ def main():
     ap.add_argument("--limit", type=int, default=40)
     ap.add_argument("--metier", default="realtor", help="métier cible (doit exister dans lib/metiers.js)")
     ap.add_argument("--niche", default="real estate brokerage", help="terme de recherche (ex: 'esthetician spa', 'dental clinic')")
+    ap.add_argument("--lang", default="", choices=["", "fr", "en"], help="langue explicite du site+email (déduite de la région ciblée) ; vide = défaut du métier")
     ap.add_argument("--resend-days", type=int, default=3, help="ne pas re-contacter un email avant N jours")
     ap.add_argument("--go", action="store_true", help="crée les sites + envoie (sinon aperçu)")
     ap.add_argument("--site", default="https://sitea1euro.vercel.app", help="base du generate-site")
@@ -202,7 +203,8 @@ def main():
         try:
             r = requests.post(args.site.rstrip('/') + "/api/generate-site",
                               json={"metier": args.metier, "nom_enseigne": row["name"], "ville": row["city"],
-                                    "email": row["email"], "plan": "site+betty", "betty_on": True}, timeout=60)
+                                    "email": row["email"], "plan": "site+betty", "betty_on": True,
+                                    "lang": args.lang or None}, timeout=60)
             d = r.json()
             if r.ok:
                 created += 1

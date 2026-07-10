@@ -40,11 +40,13 @@ def _log(line: str):
             f.write(f"[{datetime.now().strftime('%H:%M:%S')}] {line}\n")
 
 
-def _run_job(cities, niche, metier, per_city, delay, resend_days, go, ollama_n):
+def _run_job(cities, niche, metier, per_city, delay, resend_days, go, ollama_n, lang=""):
     STATUS["running"] = True
     cmd = [PY, str(ROOT / "src" / "hyperbetty_local.py"),
            "--per-city", str(per_city), "--delay", str(delay),
            "--resend-days", str(resend_days), "--niche", niche, "--metier", metier]
+    if lang in ("fr", "en"):
+        cmd += ["--lang", lang]
     if ollama_n:
         cmd += ["--ollama", str(ollama_n)]
     if cities:
@@ -92,7 +94,7 @@ def start():
     threading.Thread(target=_run_job, args=(
         cities, b.get("niche", "real estate brokerage"), b.get("metier", "realtor"),
         int(b.get("per_city", 8)), int(b.get("delay", 8)), int(b.get("resend_days", 3)),
-        bool(b.get("go")), int(b.get("ollama", 0))), daemon=True).start()
+        bool(b.get("go")), int(b.get("ollama", 0)), b.get("lang", "")), daemon=True).start()
     return jsonify({"ok": True})
 
 

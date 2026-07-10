@@ -100,6 +100,12 @@ const METIERS = [
   { id: "therapeute",    label: "🧠 Thérapeute",                  niche: "therapy practice" },
 ];
 
+// Villes francophones d'Europe → email/site en français ; le reste de
+// l'Europe, US et Moyen-Orient → anglais (langue d'affaires par défaut).
+const FRENCH_CITIES = new Set(["Paris","Lyon","Marseille","Toulouse","Nice","Nantes",
+  "Strasbourg","Brussels","Geneva","Lausanne","Luxembourg"]);
+function cityLang(city){ return FRENCH_CITIES.has(city) ? "fr" : "en"; }
+
 function fillDropdowns(){
   const cs = document.getElementById('citySelect');
   cs.innerHTML = Object.entries(CITY_GROUPS).map(([region, cities]) =>
@@ -111,10 +117,17 @@ function fillDropdowns(){
 fillDropdowns();
 
 async function start(){
-  const cities = [...document.getElementById('citySelect').selectedOptions].map(o => o.value).join('\n');
+  const selected = [...document.getElementById('citySelect').selectedOptions].map(o => o.value);
+  const cities = selected.join('\n');
   const m = METIERS.find(x => x.id === metierSelect.value) || METIERS[0];
+  // Langue = majorité parmi les villes sélectionnées (vide si aucune → défaut du métier).
+  let lang = "";
+  if(selected.length){
+    const langs = selected.map(cityLang);
+    lang = langs.filter(l => l === "fr").length > langs.length/2 ? "fr" : "en";
+  }
   const body = {
-    cities, niche: m.niche, metier: m.id,
+    cities, niche: m.niche, metier: m.id, lang,
     ollama: cities.trim() ? 0 : parseInt(ollama.value||0),
     per_city: parseInt(per_city.value), resend_days: parseInt(resend_days.value),
     go: go.checked, delay: 8,
