@@ -109,12 +109,12 @@ def _ddg(query: str) -> str:
     return ""
 
 
-def discover(city: str, n: int) -> list[str]:
-    """Scrape DuckDuckGo HTML (IP résidentielle locale) → URLs racine de courtiers.
+def discover(city: str, n: int, niche: str = "real estate brokerage") -> list[str]:
+    """Scrape DuckDuckGo HTML (IP résidentielle locale) → URLs racine d'entreprises.
     1 seule requête par ville pour ménager le rate-limit."""
     from urllib.parse import unquote
     out, seen = [], set()
-    html = _ddg(f"real estate brokerage {city}")
+    html = _ddg(f"{niche} {city}")
     for h in re.findall(r'result__a[^>]+href="([^"]+)"', html):
         m = re.search(r'uddg=([^&]+)', h)
         real = unquote(m.group(1)) if m else h
@@ -135,10 +135,13 @@ def main():
     ap = argparse.ArgumentParser(description="Auto-machine realtors US (local)")
     ap.add_argument("--cities", nargs="*", default=[])
     ap.add_argument("--ollama", type=int, default=0, help="génère N villes via Ollama")
-    ap.add_argument("--model", default="gemma2")
+    ap.add_argument("--model", default="gemma3")
     ap.add_argument("--per-city", type=int, default=8)
     ap.add_argument("--delay", type=int, default=8, help="pause (s) entre villes pour éviter le rate-limit DDG")
     ap.add_argument("--limit", type=int, default=40)
+    ap.add_argument("--metier", default="realtor", help="métier cible (doit exister dans lib/metiers.js)")
+    ap.add_argument("--niche", default="real estate brokerage", help="terme de recherche (ex: 'esthetician spa', 'dental clinic')")
+    ap.add_argument("--resend-days", type=int, default=3, help="ne pas re-contacter un email avant N jours")
     ap.add_argument("--go", action="store_true", help="crée les sites + envoie (sinon aperçu)")
     ap.add_argument("--site", default="https://sitea1euro.vercel.app", help="base du generate-site")
     ap.add_argument("--timeout", type=int, default=15)
@@ -156,7 +159,7 @@ def main():
     # 1) Découverte
     urls = []
     for idx, c in enumerate(cities):
-        found = discover(c, args.per_city)
+        found = discover(c, args.per_city, args.niche)
         print(f"  🔎 {c}: {len(found)} courtiers")
         for f in found:
             if f not in urls:
@@ -167,23 +170,44 @@ def main():
     print(f"\n→ {len(urls)} courtiers à traiter\n")
 
     # 2) Scrape + 3) génération
+    from datetime import datetime
+    SENT = Path(__file__).resolve().parent.parent / "outputs" / "sent_log.csv"
+    SENT.parent.mkdir(exist_ok=True)
+    sent = {}
+    if SENT.exists():
+        for ln in SENT.read_text().splitlines():
+            pr = ln.split(",", 1)
+            if len(pr) == 2:
+                sent[pr[0]] = pr[1]
+
+    def recently(email):
+        try:
+            return email in sent and (datetime.now() - datetime.fromisoformat(sent[email])).days < args.resend_days
+        except Exception:
+            return False
+
     created = 0
     for i, u in enumerate(urls, 1):
-        row = process_site(u, obscura_mode=("auto" if obs else "off"), timeout=args.timeout, metier_override="realtor")
+        row = process_site(u, obscura_mode=("auto" if obs else "off"), timeout=args.timeout, metier_override=args.metier)
         miss = [k for k in ("email", "name", "city") if not row.get(k)]
         if miss:
             print(f"[{i}/{len(urls)}] ⏭️  {u} — manque {','.join(miss)}")
+            continue
+        if args.go and recently(row["email"]):
+            print(f"[{i}/{len(urls)}] ⏭️  {row['email']} déjà contacté (< {args.resend_days}j)")
             continue
         if not args.go:
             print(f"[{i}/{len(urls)}] • {row['name']} | {row['email']} | {row['city']}")
             continue
         try:
             r = requests.post(args.site.rstrip('/') + "/api/generate-site",
-                              json={"metier": "realtor", "nom_enseigne": row["name"], "ville": row["city"],
+                              json={"metier": args.metier, "nom_enseigne": row["name"], "ville": row["city"],
                                     "email": row["email"], "plan": "site+betty", "betty_on": True}, timeout=60)
             d = r.json()
             if r.ok:
                 created += 1
+                with open(SENT, "a") as sf:
+                    sf.write(f"{row['email']},{datetime.now().isoformat()}\n")
                 print(f"[{i}/{len(urls)}] ✅ {row['name']} → {d.get('url')}")
             else:
                 print(f"[{i}/{len(urls)}] ❌ {row['name']} — {d.get('error', r.status_code)}")
