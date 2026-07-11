@@ -257,19 +257,25 @@ def main():
                                     "email": row["email"], "plan": "site+betty", "betty_on": True,
                                     "lang": args.lang or None}, timeout=60)
             d = r.json()
-            if r.ok:
+            if not r.ok:
+                print(f"[{i}/{len(targets)}] ❌ {row['name']} — {d.get('error', r.status_code)}")
+            elif d.get("email_sent"):
+                # Email RÉELLEMENT parti (Mailjet success) → seulement là on journalise.
                 created += 1
                 with open(SENT, "a") as sf:
                     sf.write(f"{row['email']},{datetime.now().isoformat()}\n")
                 print(f"[{i}/{len(targets)}] ✅ {row['name']} → {d.get('url')}")
             else:
-                print(f"[{i}/{len(targets)}] ❌ {row['name']} — {d.get('error', r.status_code)}")
+                # Site créé mais EMAIL NON PARTI : on NE journalise pas (retry au prochain
+                # passage) et on affiche la vraie cause (ex. Mailjet 401).
+                print(f"[{i}/{len(targets)}] ⚠️  {row['name']} — site créé mais EMAIL NON ENVOYÉ : "
+                      f"{d.get('email_error') or 'raison inconnue'} (sera réessayé)")
         except Exception as e:
             print(f"[{i}/{len(targets)}] ❌ {u} — {e}")
         time.sleep(0.3)
 
     if args.go:
-        print(f"\n✅ {created} sites créés + emails envoyés.")
+        print(f"\n✅ {created} emails RÉELLEMENT envoyés (Mailjet success).")
     else:
         print("\nℹ️  Aperçu terminé (rien créé). Pour créer les sites + envoyer les emails :")
         print("    coche « Envoi réel » dans le dashboard, puis relance.")
