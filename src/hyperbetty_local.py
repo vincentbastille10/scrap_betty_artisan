@@ -44,7 +44,16 @@ PORTALS = ("bing.", "microsoft.", "msn.", "zillow", "realtor.com", "trulia", "re
            "homelight.com", "fastexpert.com", "ratemyagent.com", "upnest.com", "niche.com",
            "classpass.", "peerspace.", "sortlist.", "booksy.", "vagaro.", "fresha.",
            "treatwell.", "planity.", "mindbodyonline.", "wellnessliving.", "houzz.",
-           "tripadvisor.", "usnews.com", "expertise.com")
+           "tripadvisor.", "usnews.com", "expertise.com",
+           # franchises/chaînes nationales immobilières — pas des indépendants → pas des leads
+           "coldwellbanker", "century21", "kellerwilliams", "kw.com", "remax",
+           "sothebysrealty", "sothebys.", "compass.com", "exprealty", "exp.com",
+           "berkshirehathaway", "bhhs", "weichert", "corcoran", "douglaselliman",
+           "howardhanna", "realtyonegroup", "windermere", "longandfoster", "century21.com",
+           "movoto", "opendoor", "offerpad", "zillow.", "coldwell",
+           # médias / annuaires (jamais des prospects)
+           "examiner", "tribune", "gazette", "herald", "chronicle", "patch.com",
+           "newspaper", "-news.", "citybizlist", "prnewswire", "businesswire")
 
 
 def _ollama_pick_model(requested: str) -> str:
