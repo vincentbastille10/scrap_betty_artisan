@@ -60,13 +60,31 @@ def _resolve_obscura() -> str:
 
 OBSCURA_BIN = _resolve_obscura()
 
-# --- Emails à jeter (plateformes, trackers, exemples) ----------------------
+# --- Emails à jeter (plateformes, hébergeurs, trackers, exemples) -----------
 BAD_EMAIL_DOMAINS = {
     "simplebo.fr", "sbcdnsb.com", "sentry.io", "wixpress.com", "example.com",
     "example.org", "godaddy.com", "squarespace.com", "wix.com", "domain.com",
     "email.com", "yourdomain.com", "sentry-next.wixpress.com",
+    # Plateformes / builders / hébergeurs (l'email n'est pas celui du prospect)
+    "moatable.com", "houzeo.com", "agentfire.com", "peerspace.com", "sortlist.com",
+    "classpass.com", "booksy.com", "vagaro.com", "fresha.com", "treatwell.com",
+    "planity.com", "mindbodyonline.com", "wellnessliving.com", "sentry.wixpress.com",
+    "wordpress.com", "shopify.com", "weebly.com", "webflow.com", "duda.co",
+    "godaddysites.com", "wixsite.com", "cloudflare.com", "sentry-cdn.com",
+    # Multinationales / grandes franchises (pas des petits prospects locaux)
+    "colliers.com", "cbre.com", "jll.com", "cushwake.com", "kw.com", "remax.com",
+    "century21.com", "coldwellbanker.com", "compass.com", "sothebys.com",
+    "sothebysrealty.com", "exprealty.com",
 }
 BAD_EMAIL_SUBSTR = ("@2x", ".png", ".jpg", ".gif", ".webp", ".svg", "@sentry")
+
+# Parties locales (avant le @) techniques : jamais l'adresse commerciale du prospect.
+BAD_EMAIL_LOCALPARTS = {
+    "bugreport", "no-reply", "noreply", "donotreply", "do-not-reply", "postmaster",
+    "mailer-daemon", "webmaster", "abuse", "privacy", "dpo", "legal", "root",
+    "wordpress", "notifications", "notification", "alerts", "alert", "security",
+    "unsubscribe", "bounce", "bounces", "mailer", "no_reply", "cron", "system",
+}
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 # Téléphone FR strict : +33 X XX XX XX XX  ou  0X XX XX XX XX (9 chiffres après l'indicatif)
@@ -210,12 +228,15 @@ def clean_email(e: str) -> str:
     e = e.strip().lower().strip(".")
     if "@" not in e:
         return ""
-    dom = e.split("@")[-1]
+    local, dom = e.split("@", 1)
     if dom in BAD_EMAIL_DOMAINS or dom.endswith(".simplebo.fr") or dom.endswith(".wixpress.com"):
         return ""
     if any(s in e for s in BAD_EMAIL_SUBSTR):
         return ""
     if "." not in dom:
+        return ""
+    # rejette les adresses techniques/plateforme (bugreport@, no-reply@, legal@…)
+    if local in BAD_EMAIL_LOCALPARTS or local.startswith(("noreply", "no-reply", "donotreply")):
         return ""
     return e
 
