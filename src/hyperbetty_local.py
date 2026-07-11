@@ -257,7 +257,8 @@ def main():
                               json={"metier": args.metier, "nom_enseigne": row["name"], "ville": row["city"],
                                     "email": row["email"], "plan": "site+betty", "betty_on": True,
                                     "lang": args.lang or None,
-                                    "brand_color": row.get("brand_color") or None}, timeout=60)
+                                    "brand_color": row.get("brand_color") or None,
+                                    "prospect_image": row.get("hero_image") or None}, timeout=60)
             d = r.json()
             if not r.ok:
                 print(f"[{i}/{len(targets)}] ❌ {row['name']} — {d.get('error', r.status_code)}")

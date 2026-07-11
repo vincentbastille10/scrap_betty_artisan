@@ -351,6 +351,26 @@ _SOCIAL_COLORS = {
 }
 
 
+def extract_hero_image(soup: BeautifulSoup, page_url: str) -> str:
+    """Image représentative du site du prospect (og:image → twitter:image) pour
+    servir de fond « sur mesure ». URL absolue ; écarte logos/favicons/icônes."""
+    from urllib.parse import urljoin
+    for attrs in ({"property": "og:image"}, {"property": "og:image:url"},
+                  {"name": "twitter:image"}, {"name": "twitter:image:src"}):
+        tag = soup.find("meta", attrs=attrs)
+        src = (tag.get("content") if tag else "") or ""
+        src = src.strip()
+        if not src:
+            continue
+        low = src.lower()
+        if any(bad in low for bad in ("logo", "favicon", "icon", "sprite", ".svg")):
+            continue
+        full = urljoin(page_url, src)
+        if full.startswith(("http://", "https://")):
+            return full
+    return ""
+
+
 def parse_page(html: str, url: str) -> dict:
     """Analyse UNE page : emails (mailto/Cloudflare/texte), candidats nom
     (og:site_name, JSON-LD, title, h1), ville structurée (JSON-LD), + footer/texte."""
@@ -390,6 +410,7 @@ def parse_page(html: str, url: str) -> dict:
     footer = soup.find("footer")
     footer_text = footer.get_text(" ", strip=True)[:2000] if footer else ""
     brand_color, brand_color_src = extract_brand_color(soup, html)
+    og_image = extract_hero_image(soup, url)
 
     return {
         "emails": list(dict.fromkeys(emails)),
@@ -397,6 +418,7 @@ def parse_page(html: str, url: str) -> dict:
         "og_name": og_name, "jl_name": jl_name, "jl_city": jl_city,
         "title": title, "h1": h1, "footer": footer_text, "text": text[:6000],
         "brand_color": brand_color, "brand_color_src": brand_color_src,
+        "og_image": og_image,
     }
 
 
@@ -463,7 +485,7 @@ def process_site(url: str, *, obscura_mode: str, timeout: int,
     row = {"site": url, "email": "", "name": "", "metier": metier_override or "", "city": "",
            "phone": "", "city_unverified": "", "email_source": "", "name_source": "",
            "city_source": "", "pages_visited": "", "source": "requests",
-           "brand_color": "", "brand_color_source": ""}
+           "brand_color": "", "brand_color_source": "", "hero_image": ""}
 
     # Exclure annuaires / plateformes nationales (pas des prospects).
     if any(host == d or host.endswith("." + d) for d in DIRECTORY_DOMAINS):
@@ -474,7 +496,7 @@ def process_site(url: str, *, obscura_mode: str, timeout: int,
     visited = []
     emails, email_src = [], ""
     og_name = jl_name = title = h1 = jl_city = ""
-    brand_color = brand_color_src = ""
+    brand_color = brand_color_src = hero_image = ""
     addr_blob = ""
 
     for path in CONTACT_PATHS:
@@ -498,6 +520,8 @@ def process_site(url: str, *, obscura_mode: str, timeout: int,
         h1 = h1 or p["h1"]
         if not brand_color and p["brand_color"]:  # couleur de la home d'abord
             brand_color, brand_color_src = p["brand_color"], p["brand_color_src"]
+        if not hero_image and p["og_image"]:       # image de la home d'abord
+            hero_image = p["og_image"]
         addr_blob += " " + p["footer"] + " " + (p["text"] if path else "")
 
     # Fallback obscura (rend le JS) si toujours pas d'email et mode actif.
@@ -515,10 +539,13 @@ def process_site(url: str, *, obscura_mode: str, timeout: int,
             h1 = h1 or p["h1"]
             if not brand_color and p["brand_color"]:
                 brand_color, brand_color_src = p["brand_color"], p["brand_color_src"]
+            if not hero_image and p["og_image"]:
+                hero_image = p["og_image"]
             addr_blob += " " + p["footer"]
 
     row["pages_visited"] = ",".join(visited)
     row["brand_color"], row["brand_color_source"] = brand_color, brand_color_src
+    row["hero_image"] = hero_image
 
     # NOM : og:site_name → JSON-LD → title → h1 → domaine. On saute une source
     # qui ressemble à un slogan/phrase plutôt que d'en faire un nom d'enseigne.
