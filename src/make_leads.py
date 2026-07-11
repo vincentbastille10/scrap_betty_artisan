@@ -156,6 +156,18 @@ def _clean_name(s: str) -> str:
     return re.split(r"\s*[|–—:·]\s*| - ", (s or "").strip())[0].strip()[:120]
 
 
+def _name_ok(s: str) -> bool:
+    """Écarte un slogan/phrase pris pour un nom d'enseigne
+    (ex. 'We do what we say we do with integrity, excellence and passion')."""
+    if not s:
+        return False
+    if len(s.split()) > 6:          # un nom d'enseigne dépasse rarement 6 mots
+        return False
+    if s.lower().startswith(("we ", "our ", "your ", "welcome")):
+        return False
+    return True
+
+
 def _domain_name(url: str) -> str:
     host = urlparse(url).netloc.replace("www.", "")
     return host.split(".")[0].replace("-", " ").title()
@@ -192,7 +204,9 @@ def parse_jsonld(soup: BeautifulSoup):
 _STREET = {"avenue", "ave", "street", "st", "road", "rd", "blvd", "boulevard",
            "drive", "dr", "lane", "ln", "way", "suite", "ste", "court", "ct",
            "place", "pl", "highway", "hwy", "parkway", "pkwy", "floor", "unit",
-           "apt", "n", "s", "e", "w"}
+           "apt", "n", "s", "e", "w",
+           "expressway", "expy", "freeway", "fwy", "turnpike", "pike", "loop",
+           "trail", "circle", "cir", "terrace", "ter", "plaza", "square", "sq"}
 
 
 def _clean_city(s: str) -> str:
@@ -418,17 +432,15 @@ def process_site(url: str, *, obscura_mode: str, timeout: int,
 
     row["pages_visited"] = ",".join(visited)
 
-    # NOM : og:site_name → JSON-LD → title → h1 → domaine nettoyé
-    if og_name:
-        row["name"], row["name_source"] = _clean_name(og_name), "og:site_name"
-    elif jl_name:
-        row["name"], row["name_source"] = _clean_name(jl_name), "json-ld"
-    elif title:
-        row["name"], row["name_source"] = _clean_name(title), "title"
-    elif h1:
-        row["name"], row["name_source"] = _clean_name(h1), "h1"
-    else:
-        row["name"], row["name_source"] = _domain_name(url), "domain"
+    # NOM : og:site_name → JSON-LD → title → h1 → domaine. On saute une source
+    # qui ressemble à un slogan/phrase plutôt que d'en faire un nom d'enseigne.
+    row["name"], row["name_source"] = _domain_name(url), "domain"
+    for cand, src in ((og_name, "og:site_name"), (jl_name, "json-ld"),
+                      (title, "title"), (h1, "h1")):
+        cleaned = _clean_name(cand)
+        if cleaned and _name_ok(cleaned):
+            row["name"], row["name_source"] = cleaned, src
+            break
 
     # VILLE : adresse structurée (JSON-LD) → « City, ST » dans footer/contact →
     # sinon ville recherchée avec city_unverified=true. Jamais un mot arbitraire.
@@ -437,7 +449,13 @@ def process_site(url: str, *, obscura_mode: str, timeout: int,
     else:
         ct = city_from_text(addr_blob) or city_from_text(" ".join([title, h1, og_name]))
         if ct:
-            row["city"], row["city_source"] = ct, "text"
+            # 'Mo-Pac Austin' : si la ville extraite contient la ville recherchée
+            # en sous-mot, on garde la ville recherchée (plus fiable qu'un bout de rue).
+            toks = [w.lower() for w in ct.split()]
+            if searched_city and searched_city.lower() in toks and ct.lower() != searched_city.lower():
+                row["city"], row["city_source"] = searched_city, "searched-match"
+            else:
+                row["city"], row["city_source"] = ct, "text"
         elif searched_city:
             row["city"], row["city_source"], row["city_unverified"] = searched_city, "searched", "true"
 
