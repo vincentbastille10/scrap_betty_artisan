@@ -27,7 +27,14 @@ PY = sys.executable
 
 CITY_POOL = ["Houston", "Miami", "Dallas", "Austin", "Phoenix", "Denver", "Charlotte",
              "Raleigh", "Nashville", "Memphis", "Atlanta", "Orlando", "Tampa", "San Antonio",
-             "Fort Worth", "Columbus", "Indianapolis", "Jacksonville", "Sacramento", "Portland"]
+             "Fort Worth", "Columbus", "Indianapolis", "Jacksonville", "Sacramento", "Portland",
+             "Seattle", "San Diego", "Las Vegas", "Chicago", "Boston", "Philadelphia",
+             "Minneapolis", "Detroit", "Kansas City", "Louisville", "Baltimore", "Milwaukee",
+             "Tucson", "Omaha", "Tulsa", "New Orleans", "Cleveland", "Pittsburgh", "Cincinnati",
+             "Boise", "Reno", "Richmond", "Des Moines", "Oklahoma City", "Albuquerque"]
+
+# Pointeur de rotation pour le mode continu (parcourt les villes sans répéter).
+_cont_idx = 0
 
 app = Flask(__name__)
 LOCK = threading.Lock()
@@ -67,11 +74,17 @@ def _run_job(cities, niche, metier, per_city, delay, resend_days, go, ollama_n, 
 
 
 def _continuous_loop(interval_min, per_city, resend_days, go, niche, metier, lang, pool):
+    global _cont_idx
     STATUS["continuous"] = True
-    pool = pool or CITY_POOL
+    # Si peu de villes sélectionnées, on prend le grand pool (variété, sinon on
+    # tourne en rond sur une ville déjà épuisée par l'anti-doublon).
+    cities = pool if pool and len(pool) >= 3 else CITY_POOL
+    batch_n = min(3, len(cities))
     while STATUS["continuous"]:
         if not STATUS["running"]:
-            batch = random.sample(pool, k=min(5, len(pool)))
+            # Rotation séquentielle : villes fraîches à chaque cycle, pas de répétition.
+            batch = [cities[(_cont_idx + k) % len(cities)] for k in range(batch_n)]
+            _cont_idx = (_cont_idx + batch_n) % len(cities)
             _log(f"🔁 Cycle automatique — villes : {', '.join(batch)}")
             _run_job(batch, niche, metier, per_city, 8, resend_days, go, 0, lang)
         secs = max(60, int(interval_min * 60))

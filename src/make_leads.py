@@ -144,6 +144,10 @@ _CITY_STOP = {
     "Team", "Login", "Sign", "View", "Our", "The", "Visa", "Visas", "Xxl", "Xxxl",
     "Size", "Sizes", "Color", "Colors", "Price", "Prices", "New", "Sale", "Shop",
     "Blog", "News", "Terms", "Privacy", "Careers", "Services", "Service", "Book",
+    # mots d'enseigne souvent captés à tort comme ville
+    "Broker", "Brokers", "Brokerage", "Realty", "Realtor", "Realtors", "Agency",
+    "Group", "Studio", "Studios", "Photography", "Photo", "Contractors", "Company",
+    "Properties", "Homes", "Advisors", "Partners", "Associates", "Realestate",
 }
 
 
