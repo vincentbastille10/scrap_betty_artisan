@@ -272,6 +272,85 @@ def extract_business_name(soup: BeautifulSoup, url: str) -> str:
     return re.sub(r"^https?://(www\.)?", "", url).split("/")[0]
 
 
+_HEX_RE = re.compile(r"#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b")
+_RGB_RE = re.compile(r"rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})", re.I)
+
+
+def _norm_hex(h: str) -> str:
+    h = h.lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    return "#" + h.lower()
+
+
+def _is_neutral(hexc: str) -> bool:
+    """Blanc/noir/gris → pas une couleur de marque exploitable."""
+    r, g, b = (int(hexc[i:i + 2], 16) for i in (1, 3, 5))
+    mx, mn = max(r, g, b), min(r, g, b)
+    return (mx > 235 and mn > 220) or mx < 38 or (mx - mn) < 26
+
+
+def _color_to_hex(c: str) -> str:
+    hm = _HEX_RE.search(c or "")
+    if hm:
+        return _norm_hex(hm.group(0))
+    rm = _RGB_RE.search(c or "")
+    if rm:
+        return "#%02x%02x%02x" % tuple(min(255, int(x)) for x in rm.groups())
+    return ""
+
+
+def extract_brand_color(soup: BeautifulSoup, html: str) -> tuple[str, str]:
+    """Devine la couleur de marque du site du prospect (pour un site « sur mesure »).
+    1) <meta theme-color>  2) variables CSS --primary/--brand/…  3) couleur
+    non-neutre la plus fréquente dans les styles. Renvoie (hex, source)."""
+    # 1) meta theme-color : explicite, signal le plus fiable
+    m = soup.find("meta", attrs={"name": "theme-color"})
+    if m and m.get("content"):
+        c = _color_to_hex(m["content"])
+        if c and not _is_neutral(c):
+            return c, "theme-color"
+    # 2) variables CSS de marque
+    for mv in re.finditer(
+        r"--(?:primary|brand|accent|main|theme|color-primary|c-primary)[\w-]*\s*:\s*"
+        r"(#[0-9a-fA-F]{3,6}|rgba?\([^)]+\))", html, re.I):
+        c = _color_to_hex(mv.group(1))
+        if c and not _is_neutral(c):
+            return c, "css-var"
+    # 3) couleur non-neutre la plus fréquente dans <style> + attributs style,
+    #    en écartant les couleurs de réseaux sociaux (icônes ≠ marque).
+    from collections import Counter
+    blob = " ".join(s.get_text() for s in soup.find_all("style"))
+    blob += " " + " ".join(el.get("style", "") for el in soup.select("[style]"))
+    cnt: Counter = Counter()
+    def _keep(c):
+        return not _is_neutral(c) and c not in _SOCIAL_COLORS
+    for hm in _HEX_RE.finditer(blob):
+        c = _norm_hex(hm.group(0))
+        if _keep(c):
+            cnt[c] += 1
+    for rm in _RGB_RE.finditer(blob):
+        c = "#%02x%02x%02x" % tuple(min(255, int(x)) for x in rm.groups())
+        if _keep(c):
+            cnt[c] += 1
+    if cnt:
+        return cnt.most_common(1)[0][0], "css-frequent"
+    return "", ""
+
+
+# Couleurs de marque des réseaux sociaux : leurs icônes polluent le comptage.
+_SOCIAL_COLORS = {
+    "#1877f2", "#3b5998", "#4267b2",           # Facebook
+    "#1da1f2", "#1d9bf0",                        # Twitter/X
+    "#25d366", "#075e54",                        # WhatsApp
+    "#e4405f", "#c13584", "#e1306c",             # Instagram
+    "#ff0000",                                    # YouTube
+    "#0077b5", "#0a66c2",                        # LinkedIn
+    "#bd081c", "#e60023",                        # Pinterest
+    "#4285f4", "#ea4335", "#34a853", "#fbbc05", # Google
+}
+
+
 def parse_page(html: str, url: str) -> dict:
     """Analyse UNE page : emails (mailto/Cloudflare/texte), candidats nom
     (og:site_name, JSON-LD, title, h1), ville structurée (JSON-LD), + footer/texte."""
@@ -310,12 +389,14 @@ def parse_page(html: str, url: str) -> dict:
     h1 = h1el.get_text(" ", strip=True) if h1el else ""
     footer = soup.find("footer")
     footer_text = footer.get_text(" ", strip=True)[:2000] if footer else ""
+    brand_color, brand_color_src = extract_brand_color(soup, html)
 
     return {
         "emails": list(dict.fromkeys(emails)),
         "phones": list(dict.fromkeys(phones)),
         "og_name": og_name, "jl_name": jl_name, "jl_city": jl_city,
         "title": title, "h1": h1, "footer": footer_text, "text": text[:6000],
+        "brand_color": brand_color, "brand_color_src": brand_color_src,
     }
 
 
@@ -381,7 +462,8 @@ def process_site(url: str, *, obscura_mode: str, timeout: int,
     host = urlparse(url).netloc.replace("www.", "").lower()
     row = {"site": url, "email": "", "name": "", "metier": metier_override or "", "city": "",
            "phone": "", "city_unverified": "", "email_source": "", "name_source": "",
-           "city_source": "", "pages_visited": "", "source": "requests"}
+           "city_source": "", "pages_visited": "", "source": "requests",
+           "brand_color": "", "brand_color_source": ""}
 
     # Exclure annuaires / plateformes nationales (pas des prospects).
     if any(host == d or host.endswith("." + d) for d in DIRECTORY_DOMAINS):
@@ -392,6 +474,7 @@ def process_site(url: str, *, obscura_mode: str, timeout: int,
     visited = []
     emails, email_src = [], ""
     og_name = jl_name = title = h1 = jl_city = ""
+    brand_color = brand_color_src = ""
     addr_blob = ""
 
     for path in CONTACT_PATHS:
@@ -413,6 +496,8 @@ def process_site(url: str, *, obscura_mode: str, timeout: int,
         jl_city = jl_city or p["jl_city"]
         title = title or p["title"]
         h1 = h1 or p["h1"]
+        if not brand_color and p["brand_color"]:  # couleur de la home d'abord
+            brand_color, brand_color_src = p["brand_color"], p["brand_color_src"]
         addr_blob += " " + p["footer"] + " " + (p["text"] if path else "")
 
     # Fallback obscura (rend le JS) si toujours pas d'email et mode actif.
@@ -428,9 +513,12 @@ def process_site(url: str, *, obscura_mode: str, timeout: int,
             jl_city = jl_city or p["jl_city"]
             title = title or p["title"]
             h1 = h1 or p["h1"]
+            if not brand_color and p["brand_color"]:
+                brand_color, brand_color_src = p["brand_color"], p["brand_color_src"]
             addr_blob += " " + p["footer"]
 
     row["pages_visited"] = ",".join(visited)
+    row["brand_color"], row["brand_color_source"] = brand_color, brand_color_src
 
     # NOM : og:site_name → JSON-LD → title → h1 → domaine. On saute une source
     # qui ressemble à un slogan/phrase plutôt que d'en faire un nom d'enseigne.

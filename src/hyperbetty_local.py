@@ -242,8 +242,9 @@ def main():
             print(f"[{i}/{len(targets)}] ⏭️  {u} — aucun email (pages: {row['pages_visited'] or '-'})")
             continue
         cv = " ⚠️ville non vérifiée" if row["city_unverified"] else ""
+        bc = f" couleur={row['brand_color']}[{row['brand_color_source']}]" if row.get("brand_color") else ""
         info = (f"name={row['name']!r}[{row['name_source']}] city={row['city']}[{row['city_source']}]{cv} "
-                f"email={row['email']}[{row['email_source']}]")
+                f"email={row['email']}[{row['email_source']}]{bc}")
         if args.go and recently(row["email"]):
             print(f"[{i}/{len(targets)}] ⏭️  {row['email']} déjà contacté (< {args.resend_days}j)")
             continue
@@ -255,7 +256,8 @@ def main():
             r = requests.post(args.site.rstrip('/') + "/api/generate-site",
                               json={"metier": args.metier, "nom_enseigne": row["name"], "ville": row["city"],
                                     "email": row["email"], "plan": "site+betty", "betty_on": True,
-                                    "lang": args.lang or None}, timeout=60)
+                                    "lang": args.lang or None,
+                                    "brand_color": row.get("brand_color") or None}, timeout=60)
             d = r.json()
             if not r.ok:
                 print(f"[{i}/{len(targets)}] ❌ {row['name']} — {d.get('error', r.status_code)}")
