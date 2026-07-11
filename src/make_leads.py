@@ -47,7 +47,18 @@ SRC_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SRC_DIR))
 from normalize import normalize_phone_fr          # noqa: E402  (validation FR stricte)
 
-OBSCURA_BIN = os.getenv("OBSCURA_BIN", "obscura")
+def _resolve_obscura() -> str:
+    """Résout le binaire obscura même sans PATH (cas d'un lancement depuis le Dock)."""
+    v = os.getenv("OBSCURA_BIN")
+    if v:
+        return v
+    if shutil.which("obscura"):
+        return "obscura"
+    p = Path.home() / ".local" / "bin" / "obscura"
+    return str(p) if p.exists() else "obscura"
+
+
+OBSCURA_BIN = _resolve_obscura()
 
 # --- Emails à jeter (plateformes, trackers, exemples) ----------------------
 BAD_EMAIL_DOMAINS = {
@@ -156,13 +167,33 @@ def parse_jsonld(soup: BeautifulSoup):
     return name[:120], city[:60]
 
 
+_STREET = {"avenue", "ave", "street", "st", "road", "rd", "blvd", "boulevard",
+           "drive", "dr", "lane", "ln", "way", "suite", "ste", "court", "ct",
+           "place", "pl", "highway", "hwy", "parkway", "pkwy", "floor", "unit",
+           "apt", "n", "s", "e", "w"}
+
+
+def _clean_city(s: str) -> str:
+    """Retire un préfixe d'adresse (numéro + rue) → garde la vraie ville.
+    'Edgefield Avenue Dallas' → 'Dallas' ; 'San Antonio' → 'San Antonio'."""
+    words = s.split()
+    # coupe tout jusqu'au dernier mot de type 'rue' (Avenue, Street…)
+    for i in range(len(words) - 1, -1, -1):
+        if words[i].lower().strip(".") in _STREET:
+            words = words[i + 1:]
+            break
+    words = [w for w in words if not any(ch.isdigit() for ch in w)]
+    return " ".join(words).strip()
+
+
 def city_from_text(text: str) -> str:
     """Ville depuis le texte UNIQUEMENT via le motif « City, ST » (virgule + vrai code état).
     Ne devine JAMAIS depuis un mot arbitraire en majuscules (évite 'XXXL', 'Visas')."""
-    for m in re.finditer(r"\b([A-Z][A-Za-z.'’\-]+(?:\s+[A-Z][A-Za-z.'’\-]+){0,2}),\s*([A-Z]{2})\b", text or ""):
-        city, st = m.group(1).strip(), m.group(2)
-        if (st in US_STATES and city.split()[0] not in _CITY_STOP
-                and re.fullmatch(r"[A-Za-z.'’\- ]{3,40}", city)):
+    for m in re.finditer(r"\b(\d*\s*[A-Z][A-Za-z.'’\-]+(?:\s+[A-Z][A-Za-z.'’\-]+){0,3}),\s*([A-Z]{2})\b", text or ""):
+        city = _clean_city(m.group(1).strip())
+        st = m.group(2)
+        if (st in US_STATES and city and city.split()[0] not in _CITY_STOP
+                and len(city.split()) <= 3 and re.fullmatch(r"[A-Za-z.'’\- ]{3,40}", city)):
             return city
     return ""
 

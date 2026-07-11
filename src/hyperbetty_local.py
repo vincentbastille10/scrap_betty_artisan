@@ -41,7 +41,10 @@ PORTALS = ("bing.", "microsoft.", "msn.", "zillow", "realtor.com", "trulia", "re
            "apartments.com", "loopnet.", "google.", "duckduckgo.", "pinterest.",
            "tiktok.", "reddit.", "bbb.org", "yellowpages.", "angi.", "thumbtack.", "nextdoor.",
            "har.com", "realtrends.com", "listwithclever.com", "brokerlistusa.com",
-           "homelight.com", "fastexpert.com", "ratemyagent.com", "upnest.com", "niche.com")
+           "homelight.com", "fastexpert.com", "ratemyagent.com", "upnest.com", "niche.com",
+           "classpass.", "peerspace.", "sortlist.", "booksy.", "vagaro.", "fresha.",
+           "treatwell.", "planity.", "mindbodyonline.", "wellnessliving.", "houzz.",
+           "tripadvisor.", "usnews.com", "expertise.com")
 
 
 def _ollama_pick_model(requested: str) -> str:
