@@ -66,15 +66,17 @@ def _run_job(cities, niche, metier, per_city, delay, resend_days, go, ollama_n, 
     STATUS["running"] = False
 
 
-def _continuous_loop(interval_h: float, per_city, resend_days, go, niche, metier):
+def _continuous_loop(interval_min, per_city, resend_days, go, niche, metier, lang, pool):
     STATUS["continuous"] = True
+    pool = pool or CITY_POOL
     while STATUS["continuous"]:
         if not STATUS["running"]:
-            batch = random.sample(CITY_POOL, k=min(5, len(CITY_POOL)))
+            batch = random.sample(pool, k=min(5, len(pool)))
             _log(f"🔁 Cycle automatique — villes : {', '.join(batch)}")
-            _run_job(batch, niche, metier, per_city, 8, resend_days, go, 0)
-        STATUS["next_run"] = (datetime.now().timestamp() + interval_h * 3600)
-        for _ in range(int(interval_h * 3600)):
+            _run_job(batch, niche, metier, per_city, 8, resend_days, go, 0, lang)
+        secs = max(60, int(interval_min * 60))
+        STATUS["next_run"] = datetime.now().timestamp() + secs
+        for _ in range(secs):
             if not STATUS["continuous"]:
                 return
             time.sleep(1)
@@ -107,12 +109,15 @@ def continuous():
         return jsonify({"ok": True})
     if STATUS["continuous"]:
         return jsonify({"error": "déjà en mode continu"}), 409
-    interval_h = float(b.get("interval_h", 6))
+    interval_min = float(b.get("interval_min", 20))
+    pool = [c.strip() for c in (b.get("cities") or "").splitlines() if c.strip()]
     threading.Thread(target=_continuous_loop, args=(
-        interval_h, int(b.get("per_city", 8)), int(b.get("resend_days", 3)),
-        bool(b.get("go")), b.get("niche", "real estate brokerage"), b.get("metier", "realtor")
+        interval_min, int(b.get("per_city", 8)), int(b.get("resend_days", 3)),
+        bool(b.get("go")), b.get("niche", "real estate brokerage"),
+        b.get("metier", "realtor"), b.get("lang", ""), pool
     ), daemon=True).start()
-    _log(f"▶️  Mode continu démarré (toutes les {interval_h}h).")
+    src = f"{len(pool)} villes sélectionnées" if pool else "villes par défaut"
+    _log(f"▶️  Mode continu démarré (toutes les {interval_min:g} min, {src}).")
     return jsonify({"ok": True})
 
 
