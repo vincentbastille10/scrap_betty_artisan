@@ -32,7 +32,7 @@ from urllib.parse import urlparse
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from make_leads import process_site, OBSCURA_BIN  # réutilise l'extraction + obscura
+from make_leads import process_site, OBSCURA_BIN, obscura_html  # réutilise l'extraction + obscura
 
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 PORTALS = ("bing.", "microsoft.", "msn.", "zillow", "realtor.com", "trulia", "redfin",
@@ -96,41 +96,74 @@ def ollama_cities(n: int, model: str) -> list[str]:
         return []
 
 
-def _ddg(query: str) -> str:
-    """1 requête DDG HTML, avec retry après pause si throttlé (HTTP 202/vide)."""
-    for attempt in range(2):
-        try:
-            r = requests.post("https://html.duckduckgo.com/html/",
-                              data={"q": query}, headers={"User-Agent": UA}, timeout=20)
-            if r.status_code == 200 and "result__a" in r.text:
-                return r.text
-        except Exception:
-            pass
-        if attempt == 0:
-            print("     …DDG throttlé, pause 20 s…")
-            time.sleep(20)
+def _http_ddg(query: str) -> str:
+    """DDG en direct (HTTP simple) — rapide, mais souvent throttlé (HTTP 202)."""
+    try:
+        r = requests.post("https://html.duckduckgo.com/html/",
+                          data={"q": query}, headers={"User-Agent": UA}, timeout=15)
+        if r.status_code == 200 and "uddg=" in r.text:
+            return r.text
+    except Exception:
+        pass
     return ""
 
 
-def discover(city: str, n: int, niche: str = "real estate brokerage") -> list[str]:
-    """Scrape DuckDuckGo HTML (IP résidentielle locale) → URLs racine d'entreprises.
-    1 seule requête par ville pour ménager le rate-limit."""
+def _hosts_from_serp(html: str) -> list[str]:
+    """Extrait les domaines racine d'une page de résultats DDG (html ou lite)."""
     from urllib.parse import unquote
-    out, seen = [], set()
-    html = _ddg(f"{niche} {city}")
-    for h in re.findall(r'result__a[^>]+href="([^"]+)"', html):
-        m = re.search(r'uddg=([^&]+)', h)
-        real = unquote(m.group(1)) if m else h
+    hosts = []
+    for enc in re.findall(r'uddg=([^&"\'>]+)', html):
         try:
-            host = urlparse(real).netloc.replace("www.", "").lower()
+            host = urlparse(unquote(enc)).netloc.replace("www.", "").lower()
         except Exception:
             continue
+        if host:
+            hosts.append(host)
+    if not hosts:  # certains rendus donnent l'URL en clair
+        for real in re.findall(r'href="(https?://[^"]+)"', html):
+            host = urlparse(real).netloc.replace("www.", "").lower()
+            if host and "duckduckgo" not in host:
+                hosts.append(host)
+    return hosts
+
+
+# Chaîne de providers de recherche — obscura EN PRIORITÉ.
+# Pourquoi : l'HTTP simple vers un moteur renvoie 202 (anti-bot) → 0 résultat.
+# obscura (IP résidentielle + rendu JS + passage des anti-bots) obtient un 200
+# complet là où l'HTTP échoue. Test confirmé : obscura→DDG = 10 résultats,
+# Google/Bing = CAPTCHA même via obscura. L'HTTP direct reste en secours rapide.
+def _search_hosts(query: str) -> tuple[str, list[str]]:
+    from urllib.parse import quote_plus
+    q = quote_plus(query)
+    providers = [
+        ("obscura·DDG",      lambda: obscura_html(f"https://html.duckduckgo.com/html/?q={q}", 22)),
+        ("obscura·DDG-lite", lambda: obscura_html(f"https://lite.duckduckgo.com/lite/?q={q}", 22)),
+        ("http·DDG",         lambda: _http_ddg(query)),
+    ]
+    for name, fn in providers:
+        try:
+            hosts = _hosts_from_serp(fn() or "")
+        except Exception:
+            hosts = []
+        if hosts:
+            return name, hosts
+    return "", []
+
+
+def discover(city: str, n: int, niche: str = "real estate brokerage") -> list[str]:
+    """URLs racine d'entreprises pour une ville, via la chaîne de providers
+    (obscura prioritaire, contourne le throttling des moteurs)."""
+    prov, hosts = _search_hosts(f"{niche} {city}")
+    out, seen = [], set()
+    for host in hosts:
         if "." not in host or any(p in host for p in PORTALS) or host in seen:
             continue
         seen.add(host)
         out.append("https://" + host + "/")
         if len(out) >= n:
             break
+    if prov:
+        print(f"     (source : {prov})")
     return out
 
 
