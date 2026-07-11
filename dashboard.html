@@ -33,7 +33,11 @@ th{color:var(--muted);font-weight:600;font-size:12px}
     <div><label>Courtiers par ville</label><input id="per_city" type="number" value="8"></div>
     <div><label>Anti-doublon (jours)</label><input id="resend_days" type="number" value="3"></div>
   </div>
-  <div class="chk"><input type="checkbox" id="go"><label for="go" style="margin:0">Envoi réel (sinon aperçu — ne crée rien)</label></div>
+  <div class="chk" style="margin-top:16px;padding:10px 14px;border:2px solid var(--accent);border-radius:10px;background:rgba(183,110,121,.08)">
+    <input type="checkbox" id="go">
+    <label for="go" style="margin:0;font-weight:700;color:var(--ink)">🚀 ENVOI RÉEL — crée les sites &amp; envoie les emails</label>
+    <span style="color:var(--muted);font-size:13px;margin-left:6px">(décoché = aperçu, rien n'est créé)</span>
+  </div>
   <div style="margin-top:18px;display:flex;gap:10px">
     <button onclick="start()">Lancer</button>
   </div>

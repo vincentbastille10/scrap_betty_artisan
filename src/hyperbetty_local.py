@@ -226,7 +226,11 @@ def main():
             print(f"[{i}/{len(targets)}] ❌ {u} — {e}")
         time.sleep(0.3)
 
-    print(f"\n{'✅ '+str(created)+' sites créés + emails envoyés.' if args.go else 'ℹ️  Aperçu — relance avec --go pour créer + envoyer.'}")
+    if args.go:
+        print(f"\n✅ {created} sites créés + emails envoyés.")
+    else:
+        print("\nℹ️  Aperçu terminé (rien créé). Pour créer les sites + envoyer les emails :")
+        print("    coche « Envoi réel » dans le dashboard, puis relance.")
 
 
 if __name__ == "__main__":
