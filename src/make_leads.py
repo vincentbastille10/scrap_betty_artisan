@@ -136,7 +136,12 @@ DIRECTORY_DOMAINS = {
 }
 
 # Pages internes à visiter (max 5), dans l'ordre.
-CONTACT_PATHS = ["", "contact", "contact-us", "about", "about-us"]
+# Home d'abord (couleur/image/nom), puis pages contact/à-propos/mentions légales
+# (les « mentions légales » FR et « Impressum » DE contiennent presque toujours
+# l'email). Visitées seulement tant qu'aucun email n'est trouvé (break early).
+CONTACT_PATHS = ["", "contact", "contact-us", "contactez-nous", "nous-contacter",
+                 "about", "about-us", "a-propos", "equipe", "team", "notre-equipe",
+                 "mentions-legales", "mentions", "legal", "impressum", "coordonnees"]
 
 # Mots qui ne sont jamais une ville (garde-fou sur le motif « City, ST »).
 _CITY_STOP = {
@@ -247,6 +252,14 @@ def clean_email(e: str) -> str:
     if "@" not in e:
         return ""
     local, dom = e.split("@", 1)
+    # Faux positifs du scan HTML brut : images retina (logo@2x.png), assets, libs.
+    if dom.rsplit(".", 1)[-1] in {"png", "jpg", "jpeg", "gif", "webp", "svg", "css",
+                                   "js", "ico", "mp4", "pdf", "json", "woff", "woff2", "ttf"}:
+        return ""
+    if any(d in dom for d in ("sentry.", "wixpress", "wix.com", "schema.org", "w3.org",
+                              "googleapis", "gstatic", "cloudflare", "jsdelivr", "example.",
+                              "domain.com", "yourdomain", "email.com", "sentry-cdn")):
+        return ""
     if dom in BAD_EMAIL_DOMAINS or dom.endswith(".simplebo.fr") or dom.endswith(".wixpress.com"):
         return ""
     if any(s in e for s in BAD_EMAIL_SUBSTR):
@@ -405,6 +418,13 @@ def parse_page(html: str, url: str) -> dict:
         e = clean_email(f"{lp}@{dom}")
         if e:
             emails.append(e)
+    # Scan du HTML BRUT (scripts, JSON, data-*, entités &#64;) : l'email y est
+    # souvent présent même quand la page visible n'en montre pas (formulaires).
+    import html as _htmlmod
+    for m in EMAIL_RE.findall(_htmlmod.unescape(html)):
+        e = clean_email(m)
+        if e:
+            emails.append(e)
     for m in PHONE_RE.findall(text):
         p = normalize_phone_fr(m)
         if p:
@@ -536,6 +556,10 @@ def process_site(url: str, *, obscura_mode: str, timeout: int,
         if not path:                                 # longueur de contenu de la home
             home_len = len(p["text"])
         addr_blob += " " + p["footer"] + " " + (p["text"] if path else "")
+        # Dès qu'on a un email, inutile de visiter les autres pages (on a déjà
+        # récupéré couleur/image/nom sur la home) → gain de temps.
+        if emails:
+            break
 
     # Fallback obscura (rend le JS) si toujours pas d'email et mode actif.
     if not emails and obscura_mode != "off":
