@@ -62,6 +62,12 @@ th{color:var(--muted);font-weight:600;font-size:12px}
 </div>
 
 <div class="card">
+  <strong>📍 Couverture — déjà fait (<span id="covTotal">0</span> couples métier × ville)</strong>
+  <div id="covBar" style="height:8px;border-radius:6px;background:#eee;margin:8px 0 12px;overflow:hidden"><div id="covFill" style="height:100%;width:0;background:var(--accent)"></div></div>
+  <table><thead><tr><th>Métier</th><th>Villes faites</th><th>Exemples</th></tr></thead><tbody id="covBody"></tbody></table>
+</div>
+
+<div class="card">
   <strong>Historique des envois (<span id="histCount">0</span>)</strong>
   <table><thead><tr><th>Email</th><th>Date</th></tr></thead><tbody id="histBody"></tbody></table>
 </div>
@@ -201,6 +207,10 @@ async function poll(){
     const h = await (await fetch('/api/history')).json();
     histCount.textContent = h.total;
     histBody.innerHTML = h.rows.map(r=>`<tr><td>${r.email}</td><td>${r.date.slice(0,16).replace('T',' ')}</td></tr>`).join('');
+    const c = await (await fetch('/api/coverage')).json();
+    covTotal.textContent = c.total;
+    covFill.style.width = (c.grid ? Math.min(100, Math.round(100*c.total/c.grid)) : 0) + '%';
+    covBody.innerHTML = c.metiers.map(m=>`<tr><td>${m.metier}</td><td>${m.count}</td><td style="color:var(--muted);font-size:12px">${m.cities.slice(0,8).join(', ')}${m.cities.length>8?'…':''}</td></tr>`).join('');
   }catch(e){}
 }
 setInterval(poll, 2000); poll();

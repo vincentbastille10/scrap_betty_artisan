@@ -226,6 +226,25 @@ def continuous():
     return jsonify({"ok": True})
 
 
+@app.route("/api/coverage")
+def coverage():
+    """Ce qui a déjà été couvert (métier × ville) — pour ne pas refaire."""
+    from collections import defaultdict
+    per = defaultdict(set)
+    if COVERED_FILE.exists():
+        for ln in COVERED_FILE.read_text().splitlines():
+            p = ln.split("|")
+            if len(p) >= 2:
+                per[p[0]].add(p[1])
+    rows = sorted(([m, sorted(c)] for m, c in per.items()), key=lambda x: -len(x[1]))
+    total = sum(len(c) for _, c in rows)
+    grid = len(METIER_POOL) * len(CITY_POOL)
+    return jsonify({
+        "total": total, "grid": grid,
+        "metiers": [{"metier": m, "count": len(c), "cities": c[:60]} for m, c in rows],
+    })
+
+
 @app.route("/api/status")
 def status():
     return jsonify(STATUS)
