@@ -248,8 +248,9 @@ def main():
             continue
         cv = " ⚠️ville non vérifiée" if row["city_unverified"] else ""
         bc = f" couleur={row['brand_color']}[{row['brand_color_source']}]" if row.get("brand_color") else ""
+        off = " → 🅱️ Betty seule (a déjà un site)" if row.get("has_site") else " → 🅰️ site + Betty (pas de site)"
         info = (f"name={row['name']!r}[{row['name_source']}] city={row['city']}[{row['city_source']}]{cv} "
-                f"email={row['email']}[{row['email_source']}]{bc}")
+                f"email={row['email']}[{row['email_source']}]{bc}{off}")
         if args.go and recently(row["email"]):
             print(f"[{i}/{len(targets)}] ⏭️  {row['email']} déjà contacté (< {args.resend_days}j)")
             continue
@@ -258,14 +259,19 @@ def main():
             continue
         print(f"[{i}/{len(targets)}] {info}")
         try:
+            # Le prospect a déjà un site → offre B (Betty seule, pré-remplie de son
+            # site) ; sinon offre A (site + Betty). C'est le cœur de la logique.
+            plan = "betty" if row.get("has_site") else "site+betty"
             r = requests.post(args.site.rstrip('/') + "/api/generate-site",
                               json={"metier": args.metier, "nom_enseigne": row["name"], "ville": row["city"],
-                                    "email": row["email"], "plan": "site+betty", "betty_on": True,
+                                    "email": row["email"], "plan": plan, "betty_on": True,
+                                    "telephone": row.get("phone") or None,
+                                    "site_url": row.get("site_url") or None,
                                     "lang": args.lang or None,
                                     "brand_color": row.get("brand_color") or None,
                                     "prospect_image": row.get("hero_image") or None,
                                     "metier_label": activity_label or None,
-                                    "activity": activity_label or None}, timeout=60)
+                                    "activity": activity_label or None}, timeout=90)
             d = r.json()
             if not r.ok:
                 print(f"[{i}/{len(targets)}] ❌ {row['name']} — {d.get('error', r.status_code)}")

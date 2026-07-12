@@ -396,6 +396,15 @@ def parse_page(html: str, url: str) -> dict:
         e = clean_email(m)
         if e:
             emails.append(e)
+    # Emails obfusqués contre les bots : « nom [at] domaine [dot] com », « (at) », « AT/DOT ».
+    for lp, dom in re.findall(
+        r"([A-Za-z0-9._%+\-]+)\s*(?:\[at\]|\(at\)|\{at\}|\s+at\s+|@)\s*"
+        r"([A-Za-z0-9.\-]+(?:\s*(?:\[dot\]|\(dot\)|\{dot\}|\s+dot\s+)\s*[A-Za-z0-9.\-]+)+)",
+        text, re.I):
+        dom = re.sub(r"\s*(?:\[dot\]|\(dot\)|\{dot\}|\s+dot\s+)\s*", ".", dom, flags=re.I)
+        e = clean_email(f"{lp}@{dom}")
+        if e:
+            emails.append(e)
     for m in PHONE_RE.findall(text):
         p = normalize_phone_fr(m)
         if p:
@@ -485,7 +494,8 @@ def process_site(url: str, *, obscura_mode: str, timeout: int,
     row = {"site": url, "email": "", "name": "", "metier": metier_override or "", "city": "",
            "phone": "", "city_unverified": "", "email_source": "", "name_source": "",
            "city_source": "", "pages_visited": "", "source": "requests",
-           "brand_color": "", "brand_color_source": "", "hero_image": ""}
+           "brand_color": "", "brand_color_source": "", "hero_image": "",
+           "has_site": "", "site_url": ""}
 
     # Exclure annuaires / plateformes nationales (pas des prospects).
     if any(host == d or host.endswith("." + d) for d in DIRECTORY_DOMAINS):
@@ -497,6 +507,7 @@ def process_site(url: str, *, obscura_mode: str, timeout: int,
     emails, email_src = [], ""
     og_name = jl_name = title = h1 = jl_city = ""
     brand_color = brand_color_src = hero_image = ""
+    home_len = 0
     addr_blob = ""
 
     for path in CONTACT_PATHS:
@@ -522,6 +533,8 @@ def process_site(url: str, *, obscura_mode: str, timeout: int,
             brand_color, brand_color_src = p["brand_color"], p["brand_color_src"]
         if not hero_image and p["og_image"]:       # image de la home d'abord
             hero_image = p["og_image"]
+        if not path:                                 # longueur de contenu de la home
+            home_len = len(p["text"])
         addr_blob += " " + p["footer"] + " " + (p["text"] if path else "")
 
     # Fallback obscura (rend le JS) si toujours pas d'email et mode actif.
@@ -546,6 +559,10 @@ def process_site(url: str, *, obscura_mode: str, timeout: int,
     row["pages_visited"] = ",".join(visited)
     row["brand_color"], row["brand_color_source"] = brand_color, brand_color_src
     row["hero_image"] = hero_image
+    # « A un vrai site » = home atteinte avec du contenu réel (≠ page parquée/vide).
+    # → détermine l'offre : site absent = offre A (site+Betty), site présent = offre B (Betty seule).
+    row["site_url"] = base
+    row["has_site"] = "true" if (visited and home_len > 400) else ""
 
     # NOM : og:site_name → JSON-LD → title → h1 → domaine. On saute une source
     # qui ressemble à un slogan/phrase plutôt que d'en faire un nom d'enseigne.
