@@ -24,9 +24,12 @@ th{color:var(--muted);font-weight:600;font-size:12px}
 
 <div class="card">
   <div class="row">
-    <div><label>Métier ciblé</label><select id="metierSelect"></select></div>
+    <div><label>Métier ciblé (préréglages)</label><select id="metierSelect"></select></div>
     <div><label>Ollama (villes en plus, si aucune sélectionnée)</label><input id="ollama" type="number" value="5"></div>
   </div>
+  <label>OU activité libre — n'importe quel métier (ex : DJ, fleuriste, food truck, dentiste…)</label>
+  <input id="activity" type="text" placeholder="Laisse vide pour utiliser le préréglage ci-dessus">
+  <div style="color:var(--muted);font-size:12px;margin-top:4px">Si rempli : HyperBetty cherche cette activité, l'affiche et cherche une image adaptée — sans liste figée.</div>
   <label>Villes (Ctrl/Cmd+clic pour en choisir plusieurs)</label>
   <select id="citySelect" multiple size="10"></select>
   <div class="row">
@@ -130,8 +133,12 @@ async function start(){
     const langs = selected.map(cityLang);
     lang = langs.filter(l => l === "fr").length > langs.length/2 ? "fr" : "en";
   }
+  // Activité libre saisie → pilote la recherche + le libellé (métier générique).
+  const act = document.getElementById('activity').value.trim();
+  const niche = act || m.niche;
+  const metier = act ? "" : m.id;
   const body = {
-    cities, niche: m.niche, metier: m.id, lang,
+    cities, niche, metier, activity: act, lang,
     ollama: cities.trim() ? 0 : parseInt(ollama.value||0),
     per_city: parseInt(per_city.value), resend_days: parseInt(resend_days.value),
     go: go.checked, delay: 8,
@@ -150,11 +157,13 @@ async function toggleContinuous(){
       const langs = selected.map(cityLang);
       lang = langs.filter(l => l === "fr").length > langs.length/2 ? "fr" : "en";
     }
+    const act = document.getElementById('activity').value.trim();
+    const preset = METIERS.find(x=>x.id===metierSelect.value)||METIERS[0];
     await fetch('/api/continuous',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
       interval_min: parseFloat(interval.value), per_city: parseInt(per_city.value),
       resend_days: parseInt(resend_days.value), go: go.checked,
-      niche: (METIERS.find(x=>x.id===metierSelect.value)||METIERS[0]).niche,
-      metier: metierSelect.value, lang, cities: selected.join('\n')
+      niche: act || preset.niche, metier: act ? "" : metierSelect.value,
+      activity: act, lang, cities: selected.join('\n')
     })});
   }
 }

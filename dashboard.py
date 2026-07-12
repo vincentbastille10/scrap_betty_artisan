@@ -47,13 +47,15 @@ def _log(line: str):
             f.write(f"[{datetime.now().strftime('%H:%M:%S')}] {line}\n")
 
 
-def _run_job(cities, niche, metier, per_city, delay, resend_days, go, ollama_n, lang=""):
+def _run_job(cities, niche, metier, per_city, delay, resend_days, go, ollama_n, lang="", activity=""):
     STATUS["running"] = True
     cmd = [PY, str(ROOT / "src" / "hyperbetty_local.py"),
            "--per-city", str(per_city), "--delay", str(delay),
            "--resend-days", str(resend_days), "--niche", niche, "--metier", metier]
     if lang in ("fr", "en"):
         cmd += ["--lang", lang]
+    if activity:
+        cmd += ["--activity", activity]
     if ollama_n:
         cmd += ["--ollama", str(ollama_n)]
     if cities:
@@ -73,7 +75,7 @@ def _run_job(cities, niche, metier, per_city, delay, resend_days, go, ollama_n, 
     STATUS["running"] = False
 
 
-def _continuous_loop(interval_min, per_city, resend_days, go, niche, metier, lang, pool):
+def _continuous_loop(interval_min, per_city, resend_days, go, niche, metier, lang, pool, activity=""):
     global _cont_idx
     STATUS["continuous"] = True
     # Si peu de villes sélectionnées, on prend le grand pool (variété, sinon on
@@ -86,7 +88,7 @@ def _continuous_loop(interval_min, per_city, resend_days, go, niche, metier, lan
             batch = [cities[(_cont_idx + k) % len(cities)] for k in range(batch_n)]
             _cont_idx = (_cont_idx + batch_n) % len(cities)
             _log(f"🔁 Cycle automatique — villes : {', '.join(batch)}")
-            _run_job(batch, niche, metier, per_city, 8, resend_days, go, 0, lang)
+            _run_job(batch, niche, metier, per_city, 8, resend_days, go, 0, lang, activity)
         secs = max(60, int(interval_min * 60))
         STATUS["next_run"] = datetime.now().timestamp() + secs
         for _ in range(secs):
@@ -109,7 +111,8 @@ def start():
     threading.Thread(target=_run_job, args=(
         cities, b.get("niche", "real estate brokerage"), b.get("metier", "realtor"),
         int(b.get("per_city", 8)), int(b.get("delay", 8)), int(b.get("resend_days", 3)),
-        bool(b.get("go")), int(b.get("ollama", 0)), b.get("lang", "")), daemon=True).start()
+        bool(b.get("go")), int(b.get("ollama", 0)), b.get("lang", ""),
+        b.get("activity", "")), daemon=True).start()
     return jsonify({"ok": True})
 
 
@@ -127,7 +130,7 @@ def continuous():
     threading.Thread(target=_continuous_loop, args=(
         interval_min, int(b.get("per_city", 8)), int(b.get("resend_days", 3)),
         bool(b.get("go")), b.get("niche", "real estate brokerage"),
-        b.get("metier", "realtor"), b.get("lang", ""), pool
+        b.get("metier", "realtor"), b.get("lang", ""), pool, b.get("activity", "")
     ), daemon=True).start()
     src = f"{len(pool)} villes sélectionnées" if pool else "villes par défaut"
     _log(f"▶️  Mode continu démarré (toutes les {interval_min:g} min, {src}).")

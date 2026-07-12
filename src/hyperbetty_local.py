@@ -184,14 +184,19 @@ def main():
     ap.add_argument("--per-city", type=int, default=8)
     ap.add_argument("--delay", type=int, default=8, help="pause (s) entre villes pour éviter le rate-limit DDG")
     ap.add_argument("--limit", type=int, default=40)
-    ap.add_argument("--metier", default="realtor", help="métier cible (doit exister dans lib/metiers.js)")
+    ap.add_argument("--metier", default="realtor", help="id métier connu (Betty pack) ; vide/'pro' = activité générique")
     ap.add_argument("--niche", default="real estate brokerage", help="terme de recherche (ex: 'esthetician spa', 'dental clinic')")
+    ap.add_argument("--activity", default="", help="libellé libre de l'activité (ex: 'DJ', 'fleuriste') affiché + requête image ; vide = déduit de la niche")
     ap.add_argument("--lang", default="", choices=["", "fr", "en"], help="langue explicite du site+email (déduite de la région ciblée) ; vide = défaut du métier")
     ap.add_argument("--resend-days", type=int, default=3, help="ne pas re-contacter un email avant N jours")
     ap.add_argument("--go", action="store_true", help="crée les sites + envoie (sinon aperçu)")
     ap.add_argument("--site", default="https://sitea1euro.vercel.app", help="base du generate-site")
     ap.add_argument("--timeout", type=int, default=15)
     args = ap.parse_args()
+
+    # Activité libre : UNIQUEMENT si saisie explicitement. Pour un métier connu
+    # (menu), on laisse le site utiliser son beau libellé/imagePrompt d'origine.
+    activity_label = (args.activity or "").strip()
 
     cities = list(args.cities)
     if args.ollama:
@@ -258,7 +263,9 @@ def main():
                                     "email": row["email"], "plan": "site+betty", "betty_on": True,
                                     "lang": args.lang or None,
                                     "brand_color": row.get("brand_color") or None,
-                                    "prospect_image": row.get("hero_image") or None}, timeout=60)
+                                    "prospect_image": row.get("hero_image") or None,
+                                    "metier_label": activity_label or None,
+                                    "activity": activity_label or None}, timeout=60)
             d = r.json()
             if not r.ok:
                 print(f"[{i}/{len(targets)}] ❌ {row['name']} — {d.get('error', r.status_code)}")
