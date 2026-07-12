@@ -53,23 +53,57 @@ CITY_POOL = ["Houston", "Miami", "Dallas", "Austin", "Phoenix", "Denver", "Charl
 _cont_idx = 0
 _met_idx = 0
 
-# Rotation des métiers en continu (id + requête de recherche) pour couvrir un
-# maximum de niches automatiquement. Marché US → recherches en anglais.
+# Rotation des métiers en continu : (id, niche EN, niche FR). La niche est
+# choisie selon la langue de la ville → petites villes FR = recherche française.
 METIER_POOL = [
-    ("realtor", "real estate brokerage"), ("estheticienne", "esthetician spa"),
-    ("coiffeuse", "hair salon"), ("coiffeur_barbier", "barber shop"),
-    ("plombier", "plumbing company"), ("artisan", "home renovation contractor"),
-    ("serrurier", "locksmith"), ("garagiste", "auto repair shop"),
-    ("paysagiste", "landscaping company"), ("menage", "house cleaning service"),
-    ("coach", "personal training studio"), ("yoga", "yoga studio"),
-    ("photographe", "photography studio"), ("dj", "wedding DJ"),
-    ("graphiste", "graphic design studio"), ("marketing", "marketing agency"),
-    ("osteopathe", "osteopathy clinic"), ("kine", "physical therapy clinic"),
-    ("dentiste", "dental clinic"), ("veterinaire", "veterinary clinic"),
-    ("nutritionniste", "nutritionist office"), ("therapeute", "therapy practice"),
-    ("avocat", "law firm"), ("comptable", "accounting firm"),
-    ("assurance", "insurance agency"), ("architecte", "architecture firm"),
-    ("traiteur", "catering company"),
+    ("realtor", "real estate brokerage", "agent immobilier"),
+    ("estheticienne", "esthetician spa", "institut de beauté"),
+    ("coiffeuse", "hair salon", "salon de coiffure"),
+    ("coiffeur_barbier", "barber shop", "barbier"),
+    ("plombier", "plumbing company", "plombier"),
+    ("artisan", "home renovation contractor", "artisan rénovation"),
+    ("serrurier", "locksmith", "serrurier"),
+    ("garagiste", "auto repair shop", "garage automobile"),
+    ("paysagiste", "landscaping company", "paysagiste"),
+    ("menage", "house cleaning service", "société de ménage"),
+    ("coach", "personal training studio", "coach sportif"),
+    ("yoga", "yoga studio", "studio de yoga"),
+    ("photographe", "photography studio", "photographe"),
+    ("dj", "wedding DJ", "DJ mariage"),
+    ("graphiste", "graphic design studio", "graphiste"),
+    ("marketing", "marketing agency", "agence marketing"),
+    ("osteopathe", "osteopathy clinic", "ostéopathe"),
+    ("kine", "physical therapy clinic", "kinésithérapeute"),
+    ("dentiste", "dental clinic", "cabinet dentaire"),
+    ("veterinaire", "veterinary clinic", "vétérinaire"),
+    ("nutritionniste", "nutritionist office", "nutritionniste"),
+    ("therapeute", "therapy practice", "thérapeute"),
+    ("avocat", "law firm", "avocat"),
+    ("comptable", "accounting firm", "expert-comptable"),
+    ("assurance", "insurance agency", "courtier en assurance"),
+    ("architecte", "architecture firm", "architecte"),
+    ("traiteur", "catering company", "traiteur"),
+]
+
+# PETITES/MOYENNES VILLES FRANÇAISES = cible prioritaire : petits exploitants
+# souvent SANS site → offre A (site + Betty 59€), euros rapides. Email en FR.
+CITY_POOL_FR = [
+    "Amiens", "Reims", "Le Havre", "Saint-Étienne", "Toulon", "Grenoble", "Dijon",
+    "Angers", "Nîmes", "Clermont-Ferrand", "Le Mans", "Brest", "Tours", "Limoges",
+    "Metz", "Besançon", "Perpignan", "Orléans", "Rouen", "Mulhouse", "Caen", "Nancy",
+    "Avignon", "Poitiers", "Pau", "La Rochelle", "Cannes", "Béziers", "Calais", "Colmar",
+    "Bourges", "Ajaccio", "Saint-Nazaire", "Quimper", "Valence", "Troyes", "Montauban",
+    "Niort", "Chambéry", "Lorient", "Beauvais", "Cholet", "Vannes", "La Roche-sur-Yon",
+    "Laval", "Bayonne", "Belfort", "Angoulême", "Châteauroux", "Tarbes", "Arras", "Blois",
+    "Chartres", "Compiègne", "Albi", "Périgueux", "Bourg-en-Bresse", "Agen", "Nevers",
+    "Auxerre", "Épinal", "Cahors", "Rodez", "Gap", "Mont-de-Marsan", "Aurillac",
+    "Carcassonne", "Narbonne", "Fréjus", "Arles", "Draguignan", "Vichy", "Roanne",
+    "Montluçon", "Saint-Malo", "Dax", "Biarritz", "Sète", "Menton", "Annecy",
+    "Thonon-les-Bains", "Chalon-sur-Saône", "Mâcon", "Vienne", "Cognac", "Saintes",
+    "Rochefort", "Libourne", "Bergerac", "Villefranche-sur-Saône", "Épernay",
+    "Charleville-Mézières", "Sedan", "Saint-Brieuc", "Lannion", "Morlaix", "Concarneau",
+    "Douarnenez", "Fougères", "Vitré", "Redon", "Dinan", "Pontivy", "Auray", "Landerneau",
+    "Guingamp", "Namur", "Charleroi", "Mons", "Tournai", "Liège", "Fribourg", "Neuchâtel", "Sion",
 ]
 
 app = Flask(__name__)
@@ -140,12 +174,18 @@ def _run_job(cities, niche, metier, per_city, delay, resend_days, go, ollama_n, 
     STATUS["running"] = False
 
 
+_FR_SET = set(CITY_POOL_FR) | {
+    "Paris", "Lyon", "Marseille", "Toulouse", "Nice", "Nantes", "Strasbourg",
+    "Montpellier", "Bordeaux", "Lille", "Rennes", "Bruxelles", "Genève", "Lausanne", "Luxembourg",
+}
+
+
 def _continuous_loop(interval_min, per_city, resend_days, go, niche, metier, lang, pool, activity=""):
     global _cont_idx, _met_idx
     STATUS["continuous"] = True
-    # Si peu de villes sélectionnées, on prend le grand pool (variété, sinon on
-    # tourne en rond sur une ville déjà épuisée par l'anti-doublon).
-    cities = pool if pool and len(pool) >= 3 else CITY_POOL
+    # Défaut = PETITES VILLES FRANÇAISES (cible prioritaire, offre A, euros rapides).
+    # Si l'utilisateur sélectionne un pool ≥ 3 villes, on l'utilise à la place.
+    cities = pool if pool and len(pool) >= 3 else CITY_POOL_FR
     batch_n = min(3, len(cities))
     # Rotation des MÉTIERS : sauf si une activité libre est saisie (là on la garde
     # fixe), on parcourt METIER_POOL pour couvrir un max de niches automatiquement.
@@ -153,10 +193,11 @@ def _continuous_loop(interval_min, per_city, resend_days, go, niche, metier, lan
     scanned = 0  # sécurité anti-boucle-infinie quand tout est couvert
     while STATUS["continuous"]:
         if not STATUS["running"]:
-            cyc_met, cyc_niche = metier, niche
+            cyc_met, cyc_niche_en, cyc_niche_fr = metier, niche, niche
             if rotate_met:
-                cyc_met, cyc_niche = METIER_POOL[_met_idx % len(METIER_POOL)]
+                cyc_met, cyc_niche_en, cyc_niche_fr = METIER_POOL[_met_idx % len(METIER_POOL)]
                 _met_idx = (_met_idx + 1) % len(METIER_POOL)
+            cyc_niche = niche  # défini plus bas selon la langue du batch
             key = activity or cyc_met
             # Villes fraîches pour CE métier : on saute les couples déjà couverts.
             covered = _covered_set()
@@ -170,8 +211,12 @@ def _continuous_loop(interval_min, per_city, resend_days, go, niche, metier, lan
                     batch.append(city)
             if batch:
                 scanned = 0
-                _log(f"🔁 Cycle auto — métier : {cyc_met} · villes : {', '.join(batch)}")
-                _run_job(batch, cyc_niche, cyc_met, per_city, 8, resend_days, go, 0, lang, activity)
+                # Niche selon la langue du batch : villes FR → recherche française.
+                is_fr = all(c in _FR_SET for c in batch)
+                cyc_niche = cyc_niche_fr if is_fr else cyc_niche_en
+                blang = "fr" if is_fr else (lang or "en")
+                _log(f"🔁 Cycle auto — {cyc_met} ({'FR' if is_fr else 'EN'}) · {', '.join(batch)}")
+                _run_job(batch, cyc_niche, cyc_met, per_city, 8, resend_days, go, 0, blang, activity)
             else:
                 scanned += 1
                 _log(f"✓ {cyc_met} : déjà couvert partout, métier suivant.")

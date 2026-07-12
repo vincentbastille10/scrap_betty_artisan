@@ -35,6 +35,36 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from make_leads import process_site, OBSCURA_BIN, obscura_html  # réutilise l'extraction + obscura
 
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+
+# Villes françaises (moy./petites) → email + site EN FRANÇAIS automatiquement.
+# Cible « petits exploitants sans site » = offre A (site + Betty), euros rapides.
+FR_CITIES = {
+    "Paris", "Lyon", "Marseille", "Toulouse", "Nice", "Nantes", "Strasbourg",
+    "Montpellier", "Bordeaux", "Lille", "Rennes", "Reims", "Le Havre", "Saint-Étienne",
+    "Toulon", "Grenoble", "Dijon", "Angers", "Nîmes", "Villeurbanne", "Clermont-Ferrand",
+    "Le Mans", "Aix-en-Provence", "Brest", "Tours", "Amiens", "Limoges", "Metz",
+    "Besançon", "Perpignan", "Orléans", "Rouen", "Mulhouse", "Caen", "Nancy", "Avignon",
+    "Poitiers", "Roubaix", "Tourcoing", "Créteil", "Versailles", "Pau", "La Rochelle",
+    "Antibes", "Cannes", "Béziers", "Calais", "Colmar", "Bourges", "Mérignac", "Ajaccio",
+    "Saint-Nazaire", "Quimper", "Valence", "Troyes", "Montauban", "Niort", "Chambéry",
+    "Lorient", "Beauvais", "Cholet", "Vannes", "La Roche-sur-Yon", "Laval", "Bayonne",
+    "Belfort", "Angoulême", "Châteauroux", "Tarbes", "Arras", "Blois", "Chartres",
+    "Compiègne", "Albi", "Périgueux", "Bourg-en-Bresse", "Agen", "Nevers", "Auxerre",
+    "Épinal", "Cahors", "Rodez", "Gap", "Mont-de-Marsan", "Aurillac", "Carcassonne",
+    "Narbonne", "Fréjus", "Arles", "Draguignan", "Vichy", "Roanne", "Montluçon",
+    "Saint-Malo", "Dax", "Biarritz", "Sète", "Menton", "Annecy", "Thonon-les-Bains",
+    "Chalon-sur-Saône", "Mâcon", "Vienne", "Cognac", "Saintes", "Rochefort", "Libourne",
+    "Bergerac", "Villefranche-sur-Saône", "Épernay", "Charleville-Mézières", "Sedan",
+    "Saint-Brieuc", "Lannion", "Morlaix", "Concarneau", "Douarnenez", "Fougères", "Vitré",
+    "Redon", "Dinan", "Pontivy", "Auray", "Landerneau", "Guingamp",
+    # Belgique / Suisse / Luxembourg francophones
+    "Bruxelles", "Liège", "Namur", "Charleroi", "Mons", "Tournai", "Genève", "Lausanne",
+    "Fribourg", "Neuchâtel", "Sion", "Luxembourg",
+}
+
+
+def _lang_for_city(city, default_lang):
+    return "fr" if city in FR_CITIES else (default_lang or None)
 PORTALS = ("bing.", "microsoft.", "msn.", "zillow", "realtor.com", "trulia", "redfin",
            "homes.com", "yelp.", "facebook.", "linkedin.", "instagram.", "youtube.",
            "twitter.", "x.com", "wikipedia.", "mapquest.", "indeed.", "glassdoor.",
@@ -267,7 +297,7 @@ def main():
                                     "email": row["email"], "plan": plan, "betty_on": True,
                                     "telephone": row.get("phone") or None,
                                     "site_url": row.get("site_url") or None,
-                                    "lang": args.lang or None,
+                                    "lang": _lang_for_city(ccity, args.lang),
                                     "brand_color": row.get("brand_color") or None,
                                     "prospect_image": row.get("hero_image") or None,
                                     "metier_label": activity_label or None,
