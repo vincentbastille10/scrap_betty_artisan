@@ -104,7 +104,46 @@ CITY_POOL_FR = [
     "Charleville-Mézières", "Sedan", "Saint-Brieuc", "Lannion", "Morlaix", "Concarneau",
     "Douarnenez", "Fougères", "Vitré", "Redon", "Dinan", "Pontivy", "Auray", "Landerneau",
     "Guingamp", "Namur", "Charleroi", "Mons", "Tournai", "Liège", "Fribourg", "Neuchâtel", "Sion",
+    # Afrique francophone + Maghreb (petits exploitants, email FR)
+    "Dakar", "Abidjan", "Douala", "Yaoundé", "Casablanca", "Rabat", "Marrakech", "Tanger",
+    "Tunis", "Sfax", "Alger", "Oran", "Bamako", "Ouagadougou", "Cotonou", "Lomé", "Libreville",
+    "Brazzaville", "Kinshasa", "Conakry", "Niamey", "Antananarivo", "Kigali", "Pointe-Noire",
 ]
+
+# PETITES/MOYENNES VILLES US (email + site en anglais).
+CITY_POOL_US = [
+    "Boise", "Bend", "Missoula", "Bozeman", "Billings", "Fargo", "Sioux Falls", "Rapid City",
+    "Cheyenne", "Casper", "Duluth", "Rochester", "Appleton", "Green Bay", "Fort Collins",
+    "Boulder", "Provo", "Ogden", "Chico", "Redding", "Eugene", "Salem", "Yakima", "Bellingham",
+    "Coeur d'Alene", "Kalispell", "Grand Forks", "Lincoln", "Topeka", "Springfield", "Columbia",
+    "Fayetteville", "Chattanooga", "Knoxville", "Asheville", "Greenville", "Savannah", "Augusta",
+    "Macon", "Tallahassee", "Gainesville", "Ocala", "Lakeland", "Pensacola", "Mobile",
+    "Montgomery", "Huntsville", "Tuscaloosa", "Lafayette", "Shreveport", "Little Rock",
+    "Springdale", "Amarillo", "Lubbock", "Midland", "Odessa", "Waco", "Tyler", "Abilene",
+    "Santa Fe", "Flagstaff", "Yuma", "Salinas", "Santa Rosa", "Carson City", "Medford",
+    "Wichita Falls", "Roswell", "Cedar Rapids", "Peoria", "Rockford", "Fort Smith", "Bismarck",
+]
+
+# ROYAUME-UNI (anglais).
+CITY_POOL_UK = [
+    "Leeds", "Sheffield", "Bradford", "Leicester", "Coventry", "Nottingham", "Newcastle",
+    "Sunderland", "Wolverhampton", "Plymouth", "Southampton", "Portsmouth", "Reading", "Derby",
+    "Stoke-on-Trent", "Hull", "Preston", "Blackpool", "Middlesbrough", "Bolton", "Norwich",
+    "Ipswich", "Oxford", "Cambridge", "York", "Exeter", "Gloucester", "Swindon", "Luton",
+    "Milton Keynes", "Northampton", "Peterborough", "Cardiff", "Swansea", "Newport", "Belfast",
+    "Aberdeen", "Dundee", "Inverness", "Bournemouth", "Brighton", "Wakefield", "Doncaster",
+]
+
+# AFRIQUE ANGLOPHONE (anglais).
+CITY_POOL_AF_EN = [
+    "Lagos", "Abuja", "Ibadan", "Port Harcourt", "Kano", "Accra", "Kumasi", "Nairobi",
+    "Mombasa", "Johannesburg", "Cape Town", "Durban", "Pretoria", "Kampala", "Dar es Salaam",
+    "Lusaka", "Harare", "Gaborone", "Windhoek", "Addis Ababa",
+]
+
+# Pool AUTOPILOT combiné (toutes régions) — la langue + la niche sont choisies
+# PAR VILLE côté hyperbetty_local (FR_CITIES → français, sinon anglais).
+AUTOPILOT_POOL = CITY_POOL_FR + CITY_POOL_US + CITY_POOL_UK + CITY_POOL_AF_EN
 
 app = Flask(__name__)
 LOCK = threading.Lock()
@@ -144,7 +183,7 @@ def _mark_covered(metier, cities):
                 f.write(f"{metier}|{c}|{datetime.now().isoformat()}\n")
 
 
-def _run_job(cities, niche, metier, per_city, delay, resend_days, go, ollama_n, lang="", activity=""):
+def _run_job(cities, niche, metier, per_city, delay, resend_days, go, ollama_n, lang="", activity="", niche_fr=""):
     STATUS["running"] = True
     if go and cities:  # on note les couples (métier, ville) réellement lancés
         _mark_covered(activity or metier, cities)
@@ -153,6 +192,8 @@ def _run_job(cities, niche, metier, per_city, delay, resend_days, go, ollama_n, 
            "--resend-days", str(resend_days), "--niche", niche, "--metier", metier]
     if lang in ("fr", "en"):
         cmd += ["--lang", lang]
+    if niche_fr:
+        cmd += ["--niche-fr", niche_fr]
     if activity:
         cmd += ["--activity", activity]
     if ollama_n:
@@ -183,9 +224,9 @@ _FR_SET = set(CITY_POOL_FR) | {
 def _continuous_loop(interval_min, per_city, resend_days, go, niche, metier, lang, pool, activity=""):
     global _cont_idx, _met_idx
     STATUS["continuous"] = True
-    # Défaut = PETITES VILLES FRANÇAISES (cible prioritaire, offre A, euros rapides).
-    # Si l'utilisateur sélectionne un pool ≥ 3 villes, on l'utilise à la place.
-    cities = pool if pool and len(pool) >= 3 else CITY_POOL_FR
+    # Défaut = toutes régions (petites villes FR + US + UK + Afrique). La langue
+    # et la niche sont choisies PAR VILLE côté hyperbetty_local (FR→fr, sinon en).
+    cities = pool if pool and len(pool) >= 3 else AUTOPILOT_POOL
     batch_n = min(3, len(cities))
     # Rotation des MÉTIERS : sauf si une activité libre est saisie (là on la garde
     # fixe), on parcourt METIER_POOL pour couvrir un max de niches automatiquement.
@@ -197,7 +238,6 @@ def _continuous_loop(interval_min, per_city, resend_days, go, niche, metier, lan
             if rotate_met:
                 cyc_met, cyc_niche_en, cyc_niche_fr = METIER_POOL[_met_idx % len(METIER_POOL)]
                 _met_idx = (_met_idx + 1) % len(METIER_POOL)
-            cyc_niche = niche  # défini plus bas selon la langue du batch
             key = activity or cyc_met
             # Villes fraîches pour CE métier : on saute les couples déjà couverts.
             covered = _covered_set()
@@ -211,12 +251,11 @@ def _continuous_loop(interval_min, per_city, resend_days, go, niche, metier, lan
                     batch.append(city)
             if batch:
                 scanned = 0
-                # Niche selon la langue du batch : villes FR → recherche française.
-                is_fr = all(c in _FR_SET for c in batch)
-                cyc_niche = cyc_niche_fr if is_fr else cyc_niche_en
-                blang = "fr" if is_fr else (lang or "en")
-                _log(f"🔁 Cycle auto — {cyc_met} ({'FR' if is_fr else 'EN'}) · {', '.join(batch)}")
-                _run_job(batch, cyc_niche, cyc_met, per_city, 8, resend_days, go, 0, blang, activity)
+                # Langue + niche décidées PAR VILLE côté hyperbetty (on passe les 2
+                # niches, lang="" → chaque ville prend sa langue via FR_CITIES).
+                _log(f"🔁 Cycle auto — {cyc_met} · {', '.join(batch)}")
+                _run_job(batch, cyc_niche_en, cyc_met, per_city, 8, resend_days, go, 0,
+                         "", activity, cyc_niche_fr)
             else:
                 scanned += 1
                 _log(f"✓ {cyc_met} : déjà couvert partout, métier suivant.")

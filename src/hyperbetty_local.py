@@ -60,11 +60,18 @@ FR_CITIES = {
     # Belgique / Suisse / Luxembourg francophones
     "Bruxelles", "Liège", "Namur", "Charleroi", "Mons", "Tournai", "Genève", "Lausanne",
     "Fribourg", "Neuchâtel", "Sion", "Luxembourg",
+    # Afrique francophone + Maghreb (business souvent en français)
+    "Dakar", "Abidjan", "Douala", "Yaoundé", "Casablanca", "Rabat", "Marrakech", "Tanger",
+    "Tunis", "Sfax", "Alger", "Oran", "Constantine", "Bamako", "Ouagadougou", "Cotonou",
+    "Lomé", "Libreville", "Brazzaville", "Kinshasa", "Lubumbashi", "Conakry", "Niamey",
+    "Nouakchott", "Antananarivo", "Kigali", "Bujumbura", "Ndjamena", "Bangui", "Pointe-Noire",
 }
 
 
 def _lang_for_city(city, default_lang):
-    return "fr" if city in FR_CITIES else (default_lang or None)
+    # Ville FR/francophone → français ; sinon la langue passée, sinon anglais
+    # (cible US/UK/Afrique anglophone) — jamais le défaut hasardeux du métier.
+    return "fr" if city in FR_CITIES else (default_lang or "en")
 PORTALS = ("bing.", "microsoft.", "msn.", "zillow", "realtor.com", "trulia", "redfin",
            "homes.com", "yelp.", "facebook.", "linkedin.", "instagram.", "youtube.",
            "twitter.", "x.com", "wikipedia.", "mapquest.", "indeed.", "glassdoor.",
@@ -215,7 +222,8 @@ def main():
     ap.add_argument("--delay", type=int, default=8, help="pause (s) entre villes pour éviter le rate-limit DDG")
     ap.add_argument("--limit", type=int, default=40)
     ap.add_argument("--metier", default="realtor", help="id métier connu (Betty pack) ; vide/'pro' = activité générique")
-    ap.add_argument("--niche", default="real estate brokerage", help="terme de recherche (ex: 'esthetician spa', 'dental clinic')")
+    ap.add_argument("--niche", default="real estate brokerage", help="terme de recherche EN (villes non-FR)")
+    ap.add_argument("--niche-fr", dest="niche_fr", default="", help="terme de recherche FR (villes françaises) ; vide = utilise --niche")
     ap.add_argument("--activity", default="", help="libellé libre de l'activité (ex: 'DJ', 'fleuriste') affiché + requête image ; vide = déduit de la niche")
     ap.add_argument("--lang", default="", choices=["", "fr", "en"], help="langue explicite du site+email (déduite de la région ciblée) ; vide = défaut du métier")
     ap.add_argument("--resend-days", type=int, default=3, help="ne pas re-contacter un email avant N jours")
@@ -240,7 +248,9 @@ def main():
     # 1) Découverte — on garde (url, ville de recherche) pour le fallback ville.
     targets, seen = [], set()
     for idx, c in enumerate(cities):
-        found = discover(c, args.per_city, args.niche)
+        # Niche par ville : française pour les villes FR, sinon anglaise.
+        niche_c = args.niche_fr if (c in FR_CITIES and args.niche_fr) else args.niche
+        found = discover(c, args.per_city, niche_c)
         print(f"  🔎 {c}: {len(found)} courtiers")
         for f in found:
             if f not in seen:
