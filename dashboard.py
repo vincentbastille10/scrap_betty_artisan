@@ -283,7 +283,7 @@ def start():
     cities = [c.strip() for c in (b.get("cities") or "").splitlines() if c.strip()]
     threading.Thread(target=_run_job, args=(
         cities, b.get("niche", "real estate brokerage"), b.get("metier", "realtor"),
-        int(b.get("per_city", 8)), int(b.get("delay", 8)), int(b.get("resend_days", 3)),
+        int(b.get("per_city", 25)), int(b.get("delay", 8)), int(b.get("resend_days", 3)),
         bool(b.get("go")), int(b.get("ollama", 0)), b.get("lang", ""),
         b.get("activity", "")), daemon=True).start()
     return jsonify({"ok": True})
@@ -301,7 +301,7 @@ def continuous():
     interval_min = float(b.get("interval_min", 20))
     pool = [c.strip() for c in (b.get("cities") or "").splitlines() if c.strip()]
     threading.Thread(target=_continuous_loop, args=(
-        interval_min, int(b.get("per_city", 8)), int(b.get("resend_days", 3)),
+        interval_min, int(b.get("per_city", 25)), int(b.get("resend_days", 3)),
         bool(b.get("go")), b.get("niche", "real estate brokerage"),
         b.get("metier", "realtor"), b.get("lang", ""), pool, b.get("activity", "")
     ), daemon=True).start()

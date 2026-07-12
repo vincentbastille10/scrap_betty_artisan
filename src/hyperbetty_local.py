@@ -90,7 +90,12 @@ PORTALS = ("bing.", "microsoft.", "msn.", "zillow", "realtor.com", "trulia", "re
            "movoto", "opendoor", "offerpad", "zillow.", "coldwell",
            # médias / annuaires (jamais des prospects)
            "examiner", "tribune", "gazette", "herald", "chronicle", "patch.com",
-           "newspaper", "-news.", "citybizlist", "prnewswire", "businesswire")
+           "newspaper", "-news.", "citybizlist", "prnewswire", "businesswire",
+           # annuaires mariage / réservation / marketplaces (pas des exploitants)
+           "theknot.", "weddingwire.", "giggster.", "wedsociety.", "zola.com", "joy.com",
+           "honeybook.", "tagvenue.", "peerspace.", "splacer.", "bark.com", "poptop.",
+           "giggster", "eventective.", "gigsalad.", "thebash.", "wedding-spot.",
+           "junebug", "greenweddingshoes", "stylemepretty", "brides.com", "vagaro.")
 
 
 def _ollama_pick_model(requested: str) -> str:
@@ -196,21 +201,57 @@ def _search_hosts(query: str) -> tuple[str, list[str]]:
     return "", []
 
 
-def discover(city: str, n: int, niche: str = "real estate brokerage") -> list[str]:
-    """URLs racine d'entreprises pour une ville, via la chaîne de providers
-    (obscura prioritaire, contourne le throttling des moteurs)."""
-    prov, hosts = _search_hosts(f"{niche} {city}")
+# Sous-niches par métier : une seule requête DDG ne rend que ~8 résultats. En
+# lançant les variantes (ex. photographe = mariage/portrait/famille/immo/évent/
+# studio) puis en dédoublonnant, on passe de ~8 à ~40-60 prospects par ville.
+NICHE_VARIANTS = {
+    "photographe": {
+        "en": ["wedding photographer", "portrait photographer", "family photographer",
+               "real estate photographer", "event photographer", "commercial photographer",
+               "photography studio", "newborn photographer"],
+        "fr": ["photographe mariage", "photographe portrait", "photographe famille",
+               "photographe immobilier", "photographe événementiel", "photographe corporate",
+               "studio photo", "photographe grossesse"],
+    },
+    "realtor": {"en": ["real estate agent", "real estate broker", "luxury real estate agent",
+                        "realtor", "property management"]},
+    "estheticienne": {"en": ["esthetician", "beauty salon", "skincare spa", "med spa", "waxing salon"],
+                      "fr": ["esthéticienne", "institut de beauté", "onglerie", "spa", "épilation"]},
+    "coiffeuse": {"en": ["hair salon", "hair stylist", "barber shop", "blow dry bar"],
+                  "fr": ["salon de coiffure", "coiffeur", "barbier", "coloriste"]},
+    "plombier": {"en": ["plumber", "plumbing company", "emergency plumber", "drain cleaning"],
+                 "fr": ["plombier", "plomberie", "plombier chauffagiste", "dépannage plomberie"]},
+    "dentiste": {"en": ["dentist", "dental clinic", "cosmetic dentist", "orthodontist"],
+                 "fr": ["dentiste", "cabinet dentaire", "orthodontiste", "chirurgien dentiste"]},
+    "coach": {"en": ["personal trainer", "fitness coach", "gym", "wellness coach"],
+              "fr": ["coach sportif", "personal trainer", "salle de sport", "coach bien-être"]},
+    "artisan": {"en": ["general contractor", "home renovation", "remodeling company", "handyman"],
+                "fr": ["artisan rénovation", "entreprise du bâtiment", "rénovation maison", "menuisier"]},
+}
+
+
+def discover(city: str, n: int, niche: str = "real estate brokerage",
+             metier: str = "", lang: str = "en") -> list[str]:
+    """URLs racine d'entreprises pour une ville. Lance la niche de base + les
+    sous-niches du métier (multi-requêtes) et dédoublonne → beaucoup plus de
+    prospects par ville qu'une requête unique."""
+    variants = NICHE_VARIANTS.get(metier, {}).get(lang or "en", [])
+    queries = list(dict.fromkeys([niche] + variants))  # base + variantes, dédup
     out, seen = [], set()
-    for host in hosts:
-        if "." not in host or any(p in host for p in PORTALS) or host in seen:
-            continue
-        seen.add(host)
-        out.append("https://" + host + "/")
+    src = ""
+    for q in queries:
+        prov, hosts = _search_hosts(f"{q} {city}")
+        src = src or prov
+        for host in hosts:
+            if "." not in host or any(p in host for p in PORTALS) or host in seen:
+                continue
+            seen.add(host)
+            out.append("https://" + host + "/")
         if len(out) >= n:
             break
-    if prov:
-        print(f"     (source : {prov})")
-    return out
+    if src:
+        print(f"     (source : {src} · {len(queries)} requêtes)")
+    return out[:n]
 
 
 def main():
@@ -218,9 +259,9 @@ def main():
     ap.add_argument("--cities", nargs="*", default=[])
     ap.add_argument("--ollama", type=int, default=0, help="génère N villes via Ollama")
     ap.add_argument("--model", default="gemma3")
-    ap.add_argument("--per-city", type=int, default=8)
+    ap.add_argument("--per-city", type=int, default=25)
     ap.add_argument("--delay", type=int, default=8, help="pause (s) entre villes pour éviter le rate-limit DDG")
-    ap.add_argument("--limit", type=int, default=40)
+    ap.add_argument("--limit", type=int, default=250)
     ap.add_argument("--metier", default="realtor", help="id métier connu (Betty pack) ; vide/'pro' = activité générique")
     ap.add_argument("--niche", default="real estate brokerage", help="terme de recherche EN (villes non-FR)")
     ap.add_argument("--niche-fr", dest="niche_fr", default="", help="terme de recherche FR (villes françaises) ; vide = utilise --niche")
@@ -249,8 +290,9 @@ def main():
     targets, seen = [], set()
     for idx, c in enumerate(cities):
         # Niche par ville : française pour les villes FR, sinon anglaise.
+        clang = _lang_for_city(c, args.lang)
         niche_c = args.niche_fr if (c in FR_CITIES and args.niche_fr) else args.niche
-        found = discover(c, args.per_city, niche_c)
+        found = discover(c, args.per_city, niche_c, args.metier, clang)
         print(f"  🔎 {c}: {len(found)} courtiers")
         for f in found:
             if f not in seen:
