@@ -83,8 +83,37 @@ def _log(line: str):
             f.write(f"[{datetime.now().strftime('%H:%M:%S')}] {line}\n")
 
 
+# Ne pas refaire les couples (métier, ville) déjà traités récemment (efficacité :
+# l'anti-doublon email évite déjà les re-contacts, ça évite les re-scans inutiles).
+COVERED_FILE = OUT / "covered.csv"
+COMBO_COOLDOWN_DAYS = 30
+
+
+def _covered_set(cooldown_days=COMBO_COOLDOWN_DAYS):
+    s = set()
+    if COVERED_FILE.exists():
+        for ln in COVERED_FILE.read_text().splitlines():
+            p = ln.split("|")
+            if len(p) >= 3:
+                try:
+                    if (datetime.now() - datetime.fromisoformat(p[2])).days < cooldown_days:
+                        s.add(p[0] + "|" + p[1])
+                except Exception:
+                    s.add(p[0] + "|" + p[1])
+    return s
+
+
+def _mark_covered(metier, cities):
+    with LOCK:
+        with open(COVERED_FILE, "a") as f:
+            for c in cities:
+                f.write(f"{metier}|{c}|{datetime.now().isoformat()}\n")
+
+
 def _run_job(cities, niche, metier, per_city, delay, resend_days, go, ollama_n, lang="", activity=""):
     STATUS["running"] = True
+    if go and cities:  # on note les couples (métier, ville) réellement lancés
+        _mark_covered(activity or metier, cities)
     cmd = [PY, str(ROOT / "src" / "hyperbetty_local.py"),
            "--per-city", str(per_city), "--delay", str(delay),
            "--resend-days", str(resend_days), "--niche", niche, "--metier", metier]
@@ -121,17 +150,34 @@ def _continuous_loop(interval_min, per_city, resend_days, go, niche, metier, lan
     # Rotation des MÉTIERS : sauf si une activité libre est saisie (là on la garde
     # fixe), on parcourt METIER_POOL pour couvrir un max de niches automatiquement.
     rotate_met = not activity
+    scanned = 0  # sécurité anti-boucle-infinie quand tout est couvert
     while STATUS["continuous"]:
         if not STATUS["running"]:
-            # Rotation séquentielle : villes fraîches à chaque cycle, pas de répétition.
-            batch = [cities[(_cont_idx + k) % len(cities)] for k in range(batch_n)]
-            _cont_idx = (_cont_idx + batch_n) % len(cities)
             cyc_met, cyc_niche = metier, niche
             if rotate_met:
                 cyc_met, cyc_niche = METIER_POOL[_met_idx % len(METIER_POOL)]
                 _met_idx = (_met_idx + 1) % len(METIER_POOL)
-            _log(f"🔁 Cycle auto — métier : {cyc_met} · villes : {', '.join(batch)}")
-            _run_job(batch, cyc_niche, cyc_met, per_city, 8, resend_days, go, 0, lang, activity)
+            key = activity or cyc_met
+            # Villes fraîches pour CE métier : on saute les couples déjà couverts.
+            covered = _covered_set()
+            batch = []
+            tries = 0
+            while len(batch) < batch_n and tries < len(cities):
+                city = cities[_cont_idx % len(cities)]
+                _cont_idx = (_cont_idx + 1) % len(cities)
+                tries += 1
+                if f"{key}|{city}" not in covered and city not in batch:
+                    batch.append(city)
+            if batch:
+                scanned = 0
+                _log(f"🔁 Cycle auto — métier : {cyc_met} · villes : {', '.join(batch)}")
+                _run_job(batch, cyc_niche, cyc_met, per_city, 8, resend_days, go, 0, lang, activity)
+            else:
+                scanned += 1
+                _log(f"✓ {cyc_met} : déjà couvert partout, métier suivant.")
+                if scanned >= len(METIER_POOL) + 1:
+                    _log("✅ Tous les couples métier×ville sont couverts (30 j). En veille.")
+                    scanned = 0
         secs = max(60, int(interval_min * 60))
         STATUS["next_run"] = datetime.now().timestamp() + secs
         for _ in range(secs):
