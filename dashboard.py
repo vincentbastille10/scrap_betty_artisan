@@ -31,10 +31,46 @@ CITY_POOL = ["Houston", "Miami", "Dallas", "Austin", "Phoenix", "Denver", "Charl
              "Seattle", "San Diego", "Las Vegas", "Chicago", "Boston", "Philadelphia",
              "Minneapolis", "Detroit", "Kansas City", "Louisville", "Baltimore", "Milwaukee",
              "Tucson", "Omaha", "Tulsa", "New Orleans", "Cleveland", "Pittsburgh", "Cincinnati",
-             "Boise", "Reno", "Richmond", "Des Moines", "Oklahoma City", "Albuquerque"]
+             "Boise", "Reno", "Richmond", "Des Moines", "Oklahoma City", "Albuquerque",
+             "Los Angeles", "New York", "San Jose", "Fresno", "Mesa", "Long Beach", "Oakland",
+             "Bakersfield", "Anaheim", "Santa Ana", "Riverside", "Stockton", "Irvine", "Chula Vista",
+             "Fremont", "San Bernardino", "Modesto", "Fontana", "Oxnard", "Colorado Springs",
+             "Aurora", "Arlington", "Corpus Christi", "Plano", "Laredo", "Lubbock", "Garland",
+             "Irving", "Amarillo", "El Paso", "McKinney", "Frisco", "Brownsville", "Killeen",
+             "Wichita", "St. Louis", "Springfield", "Lexington", "Buffalo", "Rochester", "Newark",
+             "Jersey City", "Chandler", "Scottsdale", "Gilbert", "Glendale", "Tempe", "Henderson",
+             "North Las Vegas", "Spokane", "Tacoma", "Vancouver", "Boise", "Salt Lake City",
+             "Provo", "Ogden", "Madison", "Green Bay", "Grand Rapids", "Ann Arbor", "Toledo",
+             "Akron", "Dayton", "Fort Wayne", "Chattanooga", "Knoxville", "Clarksville", "Birmingham",
+             "Montgomery", "Huntsville", "Mobile", "Baton Rouge", "Shreveport", "Little Rock",
+             "Jackson", "Columbia", "Charleston", "Greensboro", "Durham", "Winston-Salem",
+             "Cary", "Wilmington", "Savannah", "Augusta", "Columbus GA", "Fort Lauderdale",
+             "St. Petersburg", "Hialeah", "Cape Coral", "Port St. Lucie", "Tallahassee",
+             "Gainesville", "Sarasota", "Naples", "Fort Myers", "Pensacola", "Virginia Beach",
+             "Norfolk", "Chesapeake", "Alexandria", "Arlington VA"]
 
-# Pointeur de rotation pour le mode continu (parcourt les villes sans répéter).
+# Pointeurs de rotation pour le mode continu (parcourt villes + métiers sans répéter).
 _cont_idx = 0
+_met_idx = 0
+
+# Rotation des métiers en continu (id + requête de recherche) pour couvrir un
+# maximum de niches automatiquement. Marché US → recherches en anglais.
+METIER_POOL = [
+    ("realtor", "real estate brokerage"), ("estheticienne", "esthetician spa"),
+    ("coiffeuse", "hair salon"), ("coiffeur_barbier", "barber shop"),
+    ("plombier", "plumbing company"), ("artisan", "home renovation contractor"),
+    ("serrurier", "locksmith"), ("garagiste", "auto repair shop"),
+    ("paysagiste", "landscaping company"), ("menage", "house cleaning service"),
+    ("coach", "personal training studio"), ("yoga", "yoga studio"),
+    ("photographe", "photography studio"), ("dj", "wedding DJ"),
+    ("graphiste", "graphic design studio"), ("marketing", "marketing agency"),
+    ("osteopathe", "osteopathy clinic"), ("kine", "physical therapy clinic"),
+    ("dentiste", "dental clinic"), ("veterinaire", "veterinary clinic"),
+    ("nutritionniste", "nutritionist office"), ("therapeute", "therapy practice"),
+    ("avocat", "law firm"), ("comptable", "accounting firm"),
+    ("assurance", "insurance agency"), ("architecte", "architecture firm"),
+    ("traiteur", "catering company"),
+]
 
 app = Flask(__name__)
 LOCK = threading.Lock()
@@ -76,19 +112,26 @@ def _run_job(cities, niche, metier, per_city, delay, resend_days, go, ollama_n, 
 
 
 def _continuous_loop(interval_min, per_city, resend_days, go, niche, metier, lang, pool, activity=""):
-    global _cont_idx
+    global _cont_idx, _met_idx
     STATUS["continuous"] = True
     # Si peu de villes sélectionnées, on prend le grand pool (variété, sinon on
     # tourne en rond sur une ville déjà épuisée par l'anti-doublon).
     cities = pool if pool and len(pool) >= 3 else CITY_POOL
     batch_n = min(3, len(cities))
+    # Rotation des MÉTIERS : sauf si une activité libre est saisie (là on la garde
+    # fixe), on parcourt METIER_POOL pour couvrir un max de niches automatiquement.
+    rotate_met = not activity
     while STATUS["continuous"]:
         if not STATUS["running"]:
             # Rotation séquentielle : villes fraîches à chaque cycle, pas de répétition.
             batch = [cities[(_cont_idx + k) % len(cities)] for k in range(batch_n)]
             _cont_idx = (_cont_idx + batch_n) % len(cities)
-            _log(f"🔁 Cycle automatique — villes : {', '.join(batch)}")
-            _run_job(batch, niche, metier, per_city, 8, resend_days, go, 0, lang, activity)
+            cyc_met, cyc_niche = metier, niche
+            if rotate_met:
+                cyc_met, cyc_niche = METIER_POOL[_met_idx % len(METIER_POOL)]
+                _met_idx = (_met_idx + 1) % len(METIER_POOL)
+            _log(f"🔁 Cycle auto — métier : {cyc_met} · villes : {', '.join(batch)}")
+            _run_job(batch, cyc_niche, cyc_met, per_city, 8, resend_days, go, 0, lang, activity)
         secs = max(60, int(interval_min * 60))
         STATUS["next_run"] = datetime.now().timestamp() + secs
         for _ in range(secs):
