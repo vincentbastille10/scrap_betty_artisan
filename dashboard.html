@@ -161,14 +161,16 @@ async function start(){
   const act = document.getElementById('activity').value.trim();
   const niche = act || m.niche;
   const metier = act ? "" : m.id;
+  // « Lancer » = lanceur PERPÉTUEL : relance auto toutes les 20 min, en gardant
+  // TON métier, sur des villes fraîches (anti-répétition). Pas d'oubli.
   const body = {
     cities, niche, metier, activity: act, lang,
-    ollama: cities.trim() ? 0 : parseInt(ollama.value||0),
     per_city: parseInt(per_city.value), resend_days: parseInt(resend_days.value),
-    go: go.checked, delay: 8,
+    go: go.checked, interval_min: parseFloat(interval.value) || 20,
+    rotate_metiers: false,
   };
-  const r = await fetch('/api/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-  if(!r.ok){ const d=await r.json(); alert(d.error||'erreur'); }
+  const r = await fetch('/api/continuous', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  if(!r.ok){ const d=await r.json(); alert(d.error||'erreur (déjà en relance auto ? arrête-la d\'abord)'); }
 }
 async function toggleContinuous(){
   const badge = document.getElementById('contBadge');

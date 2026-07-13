@@ -221,16 +221,17 @@ _FR_SET = set(CITY_POOL_FR) | {
 }
 
 
-def _continuous_loop(interval_min, per_city, resend_days, go, niche, metier, lang, pool, activity=""):
+def _continuous_loop(interval_min, per_city, resend_days, go, niche, metier, lang, pool, activity="", rotate_metiers=True):
     global _cont_idx, _met_idx
     STATUS["continuous"] = True
     # Défaut = toutes régions (petites villes FR + US + UK + Afrique). La langue
     # et la niche sont choisies PAR VILLE côté hyperbetty_local (FR→fr, sinon en).
     cities = pool if pool and len(pool) >= 3 else AUTOPILOT_POOL
     batch_n = min(3, len(cities))
-    # Rotation des MÉTIERS : sauf si une activité libre est saisie (là on la garde
-    # fixe), on parcourt METIER_POOL pour couvrir un max de niches automatiquement.
-    rotate_met = not activity
+    # Rotation des MÉTIERS : autopilot (bouton continu) = True. Bouton « Lancer »
+    # = False → garde TON métier, avance sur les villes fraîches (anti-répétition).
+    # Une activité libre reste toujours fixe.
+    rotate_met = rotate_metiers and not activity
     scanned = 0  # sécurité anti-boucle-infinie quand tout est couvert
     while STATUS["continuous"]:
         if not STATUS["running"]:
@@ -300,13 +301,15 @@ def continuous():
         return jsonify({"error": "déjà en mode continu"}), 409
     interval_min = float(b.get("interval_min", 20))
     pool = [c.strip() for c in (b.get("cities") or "").splitlines() if c.strip()]
+    rotate_met = bool(b.get("rotate_metiers", True))
     threading.Thread(target=_continuous_loop, args=(
         interval_min, int(b.get("per_city", 25)), int(b.get("resend_days", 3)),
         bool(b.get("go")), b.get("niche", "real estate brokerage"),
-        b.get("metier", "realtor"), b.get("lang", ""), pool, b.get("activity", "")
+        b.get("metier", "realtor"), b.get("lang", ""), pool, b.get("activity", ""), rotate_met
     ), daemon=True).start()
     src = f"{len(pool)} villes sélectionnées" if pool else "villes par défaut"
-    _log(f"▶️  Mode continu démarré (toutes les {interval_min:g} min, {src}).")
+    mode = "autopilot (rotation métiers)" if rotate_met else f"métier fixe ({b.get('metier')})"
+    _log(f"▶️  Relance auto toutes les {interval_min:g} min — {mode}, {src}.")
     return jsonify({"ok": True})
 
 
