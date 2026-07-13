@@ -341,9 +341,11 @@ def main():
             continue
         print(f"[{i}/{len(targets)}] {info}")
         try:
-            # Le prospect a déjà un site → offre B (Betty seule, pré-remplie de son
-            # site) ; sinon offre A (site + Betty). C'est le cœur de la logique.
-            plan = "betty" if row.get("has_site") else "site+betty"
+            # TOUJOURS l'offre A (site + Betty, essai 7j) = le cheval de Troie :
+            # un site déjà construit + Betty qui capte des leads, gratuit 7 jours.
+            # On garde site_url : si le prospect a un site, MyBetty le crawle pour
+            # que SA Betty connaisse déjà son activité (offre encore plus forte).
+            plan = "site+betty"
             r = requests.post(args.site.rstrip('/') + "/api/generate-site",
                               json={"metier": args.metier, "nom_enseigne": row["name"], "ville": row["city"],
                                     "email": row["email"], "plan": plan, "betty_on": True,
