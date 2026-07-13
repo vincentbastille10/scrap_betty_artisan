@@ -586,7 +586,10 @@ def process_site(url: str, *, obscura_mode: str, timeout: int,
     # « A un vrai site » = home atteinte avec du contenu réel (≠ page parquée/vide).
     # → détermine l'offre : site absent = offre A (site+Betty), site présent = offre B (Betty seule).
     row["site_url"] = base
-    row["has_site"] = "true" if (visited and home_len > 400) else ""
+    # « A un VRAI site » = site substantiel (≥1800 car. de contenu) → offre B
+    # (Betty seule). Site absent/mince/placeholder → offre A (on lui fait un vrai
+    # site + Betty, essai 7 j) : c'est le funnel qui convertit (ton cash).
+    row["has_site"] = "true" if (visited and home_len > 1800) else ""
 
     # NOM : og:site_name → JSON-LD → title → h1 → domaine. On saute une source
     # qui ressemble à un slogan/phrase plutôt que d'en faire un nom d'enseigne.
